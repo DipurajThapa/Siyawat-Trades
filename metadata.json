@@ -1,0 +1,6 @@
+{
+  "name": "Siyawat Trades",
+  "description": "Siyawat Trades - Multi-currency transparency ledger and dashboard for USDT trading pool with zero-decimal metrics, time period filters, Google Sheet exports, and dedicated admin controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

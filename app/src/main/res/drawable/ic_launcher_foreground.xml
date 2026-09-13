@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Circular Badge Base -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M54,22 C71.67,22 86,36.33 86,54 C86,71.67 71.67,86 54,86 C36.33,86 22,71.67 22,54 C22,36.33 36.33,22 54,22 Z" />
+    <!-- Inner Dark Circle -->
+    <path
+        android:fillColor="#042F2E"
+        android:pathData="M54,25 C70.02,25 83,37.98 83,54 C83,70.02 70.02,83 54,83 C37.98,83 25,70.02 25,54 C25,37.98 37.98,25 54,25 Z" />
+    <!-- Outer Orbit Ring / Exchange Nodes -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#34D399"
+        android:strokeWidth="2.5"
+        android:pathData="M54,29 C67.8,29 79,40.2 79,54 C79,67.8 67.8,79 54,79 C40.2,79 29,67.8 29,54 C29,40.2 40.2,29 54,29 Z" />
+    <!-- Center USDT 'T' bar -->
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M37,41 h34 v7 h-13 v28 h-8 v-28 h-13 z" />
+    <!-- Center Vault / Coin Ring in Tether Emblem -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:pathData="M39,53 C39,47 69,47 69,53 C69,59 39,59 39,53 Z" />
+    <!-- Accent Dots -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,34 A2.5,2.5 0 1,0 54,39 A2.5,2.5 0 1,0 54,34 Z" />
+</vector>
