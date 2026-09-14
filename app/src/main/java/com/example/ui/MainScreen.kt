@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -20,6 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.ManageAccounts
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
@@ -31,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Tab
@@ -79,7 +83,9 @@ import com.example.ui.theme.TextSecondary
 @Composable
 fun MainScreen(
     viewModel: PoolViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isFullScreen: Boolean = true,
+    onToggleFullScreen: ((Boolean) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -105,10 +111,12 @@ fun MainScreen(
     } else {
         Scaffold(
             modifier = modifier.fillMaxSize(),
+            contentWindowInsets = if (isFullScreen) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 Column {
                     TopAppBar(
+                        windowInsets = if (isFullScreen) WindowInsets(0, 0, 0, 0) else TopAppBarDefaults.windowInsets,
                         title = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
@@ -129,6 +137,19 @@ fun MainScreen(
                             }
                         },
                         actions = {
+                            if (onToggleFullScreen != null) {
+                                IconButton(
+                                    onClick = { onToggleFullScreen(!isFullScreen) },
+                                    modifier = Modifier.testTag("toggle_fullscreen_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                        contentDescription = if (isFullScreen) "Exit Full Screen" else "Enter Full Screen",
+                                        tint = MutedBlueDark
+                                    )
+                                }
+                            }
+
                             IconButton(
                                 onClick = { viewModel.openDriveDialog() },
                                 modifier = Modifier.testTag("open_gdrive_dialog_btn")
