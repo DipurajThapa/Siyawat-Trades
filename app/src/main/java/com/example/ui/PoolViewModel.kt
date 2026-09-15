@@ -7,9 +7,13 @@ import com.example.data.local.PoolDatabase
 import com.example.data.local.PoolTransactionEntity
 import com.example.data.model.AppCurrency
 import com.example.data.model.ComplianceAlert
+import com.example.data.model.FifoCalculationResult
 import com.example.data.model.PeriodSummary
 import com.example.data.model.PoolMetrics
 import com.example.data.model.PoolUser
+import com.example.data.model.RecordState
+import com.example.data.model.ReconciliationState
+import com.example.data.model.SettlementState
 import com.example.data.model.TimePeriod
 import com.example.data.model.TimePeriodFilter
 import com.example.data.model.TimePeriodType
@@ -64,7 +68,13 @@ data class PoolUiState(
     ),
     val showRateDialog: Boolean = false,
     val showMoneyDistributionDialog: Boolean = false,
-    val transactionToReverse: PoolTransactionEntity? = null
+    val transactionToReverse: PoolTransactionEntity? = null,
+    // FIFO Engine & 3-Tier Lifecycle State
+    val fifoCalculationResult: FifoCalculationResult = FifoCalculationResult(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    val transactionToSettle: PoolTransactionEntity? = null,
+    val transactionToDispute: PoolTransactionEntity? = null,
+    val transactionToResolveDispute: PoolTransactionEntity? = null,
+    val showFifoLotAuditDialog: Boolean = false
 ) {
     val currentRate: Double
         get() = exchangeRates[selectedCurrency] ?: selectedCurrency.defaultRatePerUsd
@@ -103,6 +113,10 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
     private val _showRateDialog = MutableStateFlow(false)
     private val _showMoneyDistributionDialog = MutableStateFlow(false)
     private val _transactionToReverse = MutableStateFlow<PoolTransactionEntity?>(null)
+    private val _transactionToSettle = MutableStateFlow<PoolTransactionEntity?>(null)
+    private val _transactionToDispute = MutableStateFlow<PoolTransactionEntity?>(null)
+    private val _transactionToResolveDispute = MutableStateFlow<PoolTransactionEntity?>(null)
+    private val _showFifoLotAuditDialog = MutableStateFlow(false)
 
     val uiState: StateFlow<PoolUiState> = combine(
         repository.allTransactions,
@@ -124,7 +138,11 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
         _exchangeRates,
         _showRateDialog,
         _showMoneyDistributionDialog,
-        _transactionToReverse
+        _transactionToReverse,
+        _transactionToSettle,
+        _transactionToDispute,
+        _transactionToResolveDispute,
+        _showFifoLotAuditDialog
     ) { args ->
         @Suppress("UNCHECKED_CAST")
         val rawTransactions = args[0] as List<PoolTransactionEntity>
@@ -148,6 +166,10 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
         val showRateDialog = args[17] as Boolean
         val showMoneyDistribution = args[18] as Boolean
         val txToReverse = args[19] as PoolTransactionEntity?
+        val txToSettle = args[20] as PoolTransactionEntity?
+        val txToDispute = args[21] as PoolTransactionEntity?
+        val txToResolveDispute = args[22] as PoolTransactionEntity?
+        val showFifoAudit = args[23] as Boolean
 
         val currentRate = exchangeRates[selectedCurrency] ?: selectedCurrency.defaultRatePerUsd
 
@@ -173,6 +195,7 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
             ratePerUsd = currentRate
         )
         val alerts = repository.evaluateComplianceAlerts(rawTransactions, metrics)
+        val fifoResult = repository.calculateFifoLedger(rawTransactions)
 
         // 3. Compute period statistics converted to active display currency
         var moneySpent = 0L
@@ -258,7 +281,12 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
             exchangeRates = exchangeRates,
             showRateDialog = showRateDialog,
             showMoneyDistributionDialog = showMoneyDistribution,
-            transactionToReverse = txToReverse
+            transactionToReverse = txToReverse,
+            fifoCalculationResult = fifoResult,
+            transactionToSettle = txToSettle,
+            transactionToDispute = txToDispute,
+            transactionToResolveDispute = txToResolveDispute,
+            showFifoLotAuditDialog = showFifoAudit
         )
     }.stateIn(
         scope = viewModelScope,
@@ -269,6 +297,7 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             repository.checkAndSeedInitialData()
+            repository.autoReconcileTimeouts()
         }
     }
 
@@ -783,6 +812,144 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
                 _toastMessage.value = "Transaction reversed. Active balances updated."
             }.onFailure { ex ->
                 _toastMessage.value = "Reversal failed: ${ex.message}"
+            }
+        }
+    }
+
+    // Settlement Workflow
+    fun openSettleDialog(tx: PoolTransactionEntity) {
+        _transactionToSettle.value = tx
+    }
+
+    fun closeSettleDialog() {
+        _transactionToSettle.value = null
+    }
+
+    fun recordSettlement(txId: Long, bankUtr: String) {
+        viewModelScope.launch {
+            val result = repository.recordSettlement(
+                id = txId,
+                operatorUser = _currentUser.value,
+                bankUtr = bankUtr
+            )
+            result.onSuccess {
+                _transactionToSettle.value = null
+                _toastMessage.value = "Settlement recorded with UTR: $bankUtr. 72h user confirmation window opened."
+            }.onFailure { ex ->
+                _toastMessage.value = "Settlement recording failed: ${ex.message}"
+            }
+        }
+    }
+
+    // User Confirmation & Dispute
+    fun confirmUserReceipt(txId: Long) {
+        viewModelScope.launch {
+            val result = repository.confirmUserReceipt(
+                id = txId,
+                currentUser = _currentUser.value
+            )
+            result.onSuccess {
+                _toastMessage.value = "Receipt confirmed. Transaction fully reconciled!"
+            }.onFailure { ex ->
+                _toastMessage.value = "Confirmation failed: ${ex.message}"
+            }
+        }
+    }
+
+    fun openDisputeDialog(tx: PoolTransactionEntity) {
+        _transactionToDispute.value = tx
+    }
+
+    fun closeDisputeDialog() {
+        _transactionToDispute.value = null
+    }
+
+    fun raiseDispute(txId: Long, reason: String) {
+        viewModelScope.launch {
+            val result = repository.raiseDispute(
+                id = txId,
+                currentUser = _currentUser.value,
+                reason = reason
+            )
+            result.onSuccess {
+                _transactionToDispute.value = null
+                _toastMessage.value = "Dispute flagged. Transaction placed under central admin review."
+            }.onFailure { ex ->
+                _toastMessage.value = "Failed to raise dispute: ${ex.message}"
+            }
+        }
+    }
+
+    fun openResolveDisputeDialog(tx: PoolTransactionEntity) {
+        _transactionToResolveDispute.value = tx
+    }
+
+    fun closeResolveDisputeDialog() {
+        _transactionToResolveDispute.value = null
+    }
+
+    fun resolveDispute(txId: Long, notes: String, isConfirmed: Boolean) {
+        viewModelScope.launch {
+            val result = repository.resolveDispute(
+                id = txId,
+                adminUser = _currentUser.value,
+                resolutionNotes = notes,
+                isConfirmed = isConfirmed
+            )
+            result.onSuccess {
+                _transactionToResolveDispute.value = null
+                val action = if (isConfirmed) "confirmed as delivered" else "reversed with compensating entry"
+                _toastMessage.value = "Dispute resolved: $action."
+            }.onFailure { ex ->
+                _toastMessage.value = "Failed to resolve dispute: ${ex.message}"
+            }
+        }
+    }
+
+    // Maker-Checker High-Value Dual Control Verification
+    fun verifyTransactionMakerChecker(
+        txId: Long,
+        verified: Boolean,
+        notes: String? = null,
+        approvalScreenshotUri: String? = null
+    ) {
+        viewModelScope.launch {
+            val result = repository.verifyTransactionWithMakerChecker(
+                id = txId,
+                adminUser = _currentUser.value,
+                verified = verified,
+                notes = notes,
+                approvalScreenshotUri = approvalScreenshotUri
+            )
+            result.onSuccess { msg ->
+                _toastMessage.value = msg
+            }.onFailure { ex ->
+                _toastMessage.value = "Verification failed: ${ex.message}"
+            }
+        }
+    }
+
+    // FIFO Inspection Dialog
+    fun openFifoLotAudit() {
+        _showFifoLotAuditDialog.value = true
+    }
+
+    fun closeFifoLotAudit() {
+        _showFifoLotAuditDialog.value = false
+    }
+
+    fun getFifoLedgerResult(): com.example.data.model.FifoCalculationResult {
+        return repository.calculateFifoLedger(uiState.value.transactions)
+    }
+
+    fun triggerAutoReconciliation() {
+        viewModelScope.launch {
+            val result = repository.autoReconcileTimeouts()
+            val reconciledCount = result.getOrDefault(0)
+            if (reconciledCount > 0) {
+                _toastMessage.value = "$reconciledCount transactions auto-reconciled after 72h SLA."
+            } else {
+                _toastMessage.value = "Reconciliation up to date. No pending 72h timeouts."
             }
         }
     }

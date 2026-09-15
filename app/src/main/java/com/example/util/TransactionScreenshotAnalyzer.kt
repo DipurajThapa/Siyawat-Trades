@@ -21,6 +21,7 @@ data class ScreenshotAnalysisResult(
     val extractedAmountFormatted: String? = null,
     val detectedCurrency: AppCurrency? = null,
     val extractedReferenceId: String? = null,
+    val detectedInstitution: String? = null,
     val isAmountMissing: Boolean = false,
     val isReferenceMissing: Boolean = false,
     val missingNotification: String? = null,
@@ -50,7 +51,24 @@ object TransactionScreenshotAnalyzer {
     ): ScreenshotAnalysisResult = withContext(Dispatchers.Default) {
         try {
             val inputImage = withContext(Dispatchers.IO) {
-                InputImage.fromFilePath(context, imageUri)
+                val bitmap = try {
+                    if (imageUri.scheme == "file" || (imageUri.path != null && java.io.File(imageUri.path!!).exists())) {
+                        BitmapFactory.decodeFile(imageUri.path)
+                    } else {
+                        context.contentResolver.openInputStream(imageUri)?.use { stream ->
+                            BitmapFactory.decodeStream(stream)
+                        }
+                    }
+                } catch (e: Exception) {
+                    null
+                } ?: try {
+                    context.contentResolver.openInputStream(imageUri)?.use { stream ->
+                        BitmapFactory.decodeStream(stream)
+                    }
+                } catch (e: Exception) {
+                    null
+                } ?: throw IllegalArgumentException("Could not decode image from uri: $imageUri")
+                InputImage.fromBitmap(bitmap, 0)
             }
             val visionText = recognizer.process(inputImage).await()
             val fullText = visionText.text
@@ -135,24 +153,58 @@ object TransactionScreenshotAnalyzer {
         var detectedAmount: Double? = null
         var detectedCurrency: AppCurrency? = null
         var detectedReferenceId: String? = null
+        var detectedInstitution: String? = null
 
-        // 1. Currency Detection
         val upperText = fullText.uppercase(Locale.US)
-        if (upperText.contains("AED") || fullText.contains("د.إ")) {
+
+        // 1. Detect Financial Institution / Exchange
+        val institutions = listOf(
+            "EMIRATES NBD" to "Emirates NBD",
+            "ADCB" to "Abu Dhabi Commercial Bank (ADCB)",
+            "DUBAI ISLAMIC BANK" to "Dubai Islamic Bank (DIB)",
+            "DIB" to "Dubai Islamic Bank (DIB)",
+            "MASHREQ" to "Mashreq Bank",
+            "FIRST ABU DHABI BANK" to "First Abu Dhabi Bank (FAB)",
+            "FAB" to "First Abu Dhabi Bank (FAB)",
+            "AL ANSARI" to "Al Ansari Exchange",
+            "LULU EXCHANGE" to "LuLu Exchange",
+            "RAKBANK" to "RAKBANK",
+            "COMMERCIAL BANK OF DUBAI" to "Commercial Bank of Dubai (CBD)",
+            "CBD" to "Commercial Bank of Dubai (CBD)",
+            "BINANCE" to "Binance",
+            "OKX" to "OKX",
+            "BYBIT" to "Bybit",
+            "HDFC" to "HDFC Bank",
+            "STATE BANK OF INDIA" to "State Bank of India (SBI)",
+            "SBI" to "State Bank of India (SBI)",
+            "ICICI" to "ICICI Bank"
+        )
+        for ((key, name) in institutions) {
+            if (upperText.contains(key)) {
+                detectedInstitution = name
+                break
+            }
+        }
+
+        // 2. Currency Detection
+        if (upperText.contains("AED") || fullText.contains("د.إ") || upperText.contains("DIRHAM") || upperText.contains("DHS")) {
             detectedCurrency = AppCurrency.AED
-        } else if (upperText.contains("INR") || fullText.contains("₹")) {
+        } else if (upperText.contains("INR") || fullText.contains("₹") || upperText.contains("RUPEE") || upperText.contains("RS.")) {
             detectedCurrency = AppCurrency.INR
-        } else if (upperText.contains("USD") || fullText.contains("$")) {
+        } else if (upperText.contains("USD") || fullText.contains("$") || upperText.contains("USDT") || upperText.contains("DOLLAR")) {
             detectedCurrency = AppCurrency.USD
         }
 
-        // 2. Extract Reference ID / Transaction ID
-        // Look for reference markers
+        // 3. Extract Reference ID / Transaction ID
         val refKeywords = listOf(
-            "TRANSACTION ID", "TXN ID", "TXID", "REFERENCE NO", "REFERENCE NUMBER",
-            "REF NO", "REF NUMBER", "REF #", "REFERENCE #", "REFERENCE",
-            "TRANSFER ID", "ORDER ID", "UTR", "BANK REF", "CONFIRMATION NO",
-            "CONFIRMATION NUMBER", "WIRE REF", "SLIP NO", "PAYMENT REF"
+            "TRANSACTION ID", "TXN ID", "TXN NO", "TXN NUMBER", "TXN", "TXID",
+            "TRANSACTION NUMBER", "TRANSACTION NO", "TRANSACTION REF", "TRANSACTION #",
+            "REFERENCE NO", "REFERENCE NUMBER", "REF NO", "REF NUMBER", "REF #",
+            "REFERENCE #", "REFERENCE ID", "REF ID", "REF.", "REFERENCE",
+            "TRANSFER ID", "ORDER ID", "UTR NO", "UTR NUMBER", "UTR", "BANK REF", "BANK REFERENCE",
+            "CONFIRMATION NO", "CONFIRMATION NUMBER", "CONFIRMATION CODE", "WIRE REF", "SLIP NO",
+            "PAYMENT REF", "RECEIPT NO", "RECEIPT NUMBER", "PAYMENT ID", "FT REF", "FT NUMBER",
+            "AUTH CODE", "APPROVAL CODE", "JOURNAL NO", "BATCH NO", "EXTERNAL REF"
         )
 
         for (i in lines.indices) {
@@ -161,20 +213,32 @@ object TransactionScreenshotAnalyzer {
 
             for (kw in refKeywords) {
                 if (lineUpper.contains(kw)) {
-                    // Check if value is on the same line after keyword/colon/hash
-                    val afterKw = line.substring(lineUpper.indexOf(kw) + kw.length)
-                        .trimStart(':', '-', '#', ' ', '\t')
+                    // Check on same line after keyword
+                    val idx = lineUpper.indexOf(kw)
+                    val afterKw = line.substring(idx + kw.length)
+                        .trimStart(':', '-', '#', '.', ' ', '\t')
                         .trim()
 
                     val cleanVal = extractCandidateRef(afterKw)
                     if (cleanVal != null) {
                         detectedReferenceId = cleanVal
                         break
-                    } else if (i + 1 < lines.size) {
-                        // Check next line for the ID value
+                    }
+
+                    // Check line i + 1
+                    if (i + 1 < lines.size) {
                         val nextCandidate = extractCandidateRef(lines[i + 1].trim())
                         if (nextCandidate != null) {
                             detectedReferenceId = nextCandidate
+                            break
+                        }
+                    }
+
+                    // Check line i + 2
+                    if (i + 2 < lines.size) {
+                        val next2Candidate = extractCandidateRef(lines[i + 2].trim())
+                        if (next2Candidate != null) {
+                            detectedReferenceId = next2Candidate
                             break
                         }
                     }
@@ -183,38 +247,52 @@ object TransactionScreenshotAnalyzer {
             if (detectedReferenceId != null) break
         }
 
-        // If not found via keywords, check for explicit known patterns
+        // Regex fallback for explicit standard patterns
         if (detectedReferenceId == null) {
-            // Pattern like WIRE-2026-..., TXN-TRC20-..., FT24..., 12-digit UTR
-            val directRefRegex = Pattern.compile("\\b(WIRE-[A-Z0-9\\-]+|TXN-[A-Z0-9\\-]+|FT[0-9]{8,18}|UTR[0-9]{8,16})\\b", Pattern.CASE_INSENSITIVE)
+            val directRefRegex = Pattern.compile(
+                "\\b(WIRE-[A-Z0-9\\-]+|TXN-[A-Z0-9\\-]+|FT[0-9]{8,18}|UTR[0-9]{8,18}|UPI/[0-9]{12}|REF-[A-Z0-9\\-]+)\\b",
+                Pattern.CASE_INSENSITIVE
+            )
             val matcher = directRefRegex.matcher(fullText)
             if (matcher.find()) {
                 detectedReferenceId = matcher.group(1)?.trim()
             }
         }
 
-        // 3. Extract Amount
+        // 4. Extract Amount
         val amountKeywords = listOf(
-            "AMOUNT", "TOTAL", "SUM", "SENT", "TRANSFERRED", "DEBIT",
-            "PAID", "VALUE", "NET AMOUNT", "DEPOSITED"
+            "TOTAL AMOUNT", "TRANSFER AMOUNT", "AMOUNT TRANSFERRED", "NET AMOUNT",
+            "AMOUNT", "TOTAL", "SUM", "SENT", "TRANSFERRED", "DEBIT", "DEBITED",
+            "PAID", "VALUE", "DEPOSITED"
         )
 
-        // Try finding labeled amount first
+        // Try labeled amount lines first
         for (i in lines.indices) {
             val line = lines[i]
             val lineUpper = line.uppercase(Locale.US)
 
             for (kw in amountKeywords) {
                 if (lineUpper.contains(kw)) {
-                    val afterKw = line.substring(lineUpper.indexOf(kw) + kw.length)
+                    val idx = lineUpper.indexOf(kw)
+                    val afterKw = line.substring(idx + kw.length)
                     val parsed = parseAmountFromSnippet(afterKw)
                     if (parsed != null && parsed > 0.0) {
                         detectedAmount = parsed
                         break
-                    } else if (i + 1 < lines.size) {
+                    }
+
+                    if (i + 1 < lines.size) {
                         val nextParsed = parseAmountFromSnippet(lines[i + 1])
                         if (nextParsed != null && nextParsed > 0.0) {
                             detectedAmount = nextParsed
+                            break
+                        }
+                    }
+
+                    if (i + 2 < lines.size) {
+                        val next2Parsed = parseAmountFromSnippet(lines[i + 2])
+                        if (next2Parsed != null && next2Parsed > 0.0) {
+                            detectedAmount = next2Parsed
                             break
                         }
                     }
@@ -223,7 +301,7 @@ object TransactionScreenshotAnalyzer {
             if (detectedAmount != null) break
         }
 
-        // If still not found, search lines containing currency prefixes like AED 10,000, $5,000, etc.
+        // If not found via labeled keywords, scan lines containing currency tags
         if (detectedAmount == null) {
             for (line in lines) {
                 if (line.contains("AED", ignoreCase = true) ||
@@ -231,7 +309,8 @@ object TransactionScreenshotAnalyzer {
                     line.contains("₹") ||
                     line.contains("د.إ") ||
                     line.contains("USD", ignoreCase = true) ||
-                    line.contains("INR", ignoreCase = true)
+                    line.contains("INR", ignoreCase = true) ||
+                    line.contains("USDT", ignoreCase = true)
                 ) {
                     val parsed = parseAmountFromSnippet(line)
                     if (parsed != null && parsed > 0.0) {
@@ -242,7 +321,7 @@ object TransactionScreenshotAnalyzer {
             }
         }
 
-        // 4. Missing Information Checks
+        // 5. Missing Information Checks
         val isAmountMissing = detectedAmount == null
         val isReferenceMissing = detectedReferenceId == null
 
@@ -256,7 +335,7 @@ object TransactionScreenshotAnalyzer {
             else -> null
         }
 
-        // 5. Suspicious Activity Validation
+        // 6. Suspicious Activity Validation
         val suspiciousWarnings = mutableListOf<String>()
 
         // Check A: Amount mismatch against user's entered amount
@@ -313,6 +392,7 @@ object TransactionScreenshotAnalyzer {
             extractedAmountFormatted = formattedAmount,
             detectedCurrency = detectedCurrency,
             extractedReferenceId = detectedReferenceId,
+            detectedInstitution = detectedInstitution,
             isAmountMissing = isAmountMissing,
             isReferenceMissing = isReferenceMissing,
             missingNotification = missingNotification,
@@ -325,19 +405,29 @@ object TransactionScreenshotAnalyzer {
 
     private fun extractCandidateRef(text: String): String? {
         if (text.isBlank()) return null
-        // Strip common trailing punctuation
-        val cleaned = text.trim().trimEnd('.', ',', ';')
-        // Match alphanumeric reference sequences with hyphens or underscores
-        val matcher = Pattern.compile("^[A-Za-z0-9\\-_/]{4,50}$").matcher(cleaned)
-        if (matcher.matches()) {
-            return cleaned
+        val cleaned = text.trim().trimEnd('.', ',', ';', ':')
+        val noiseWords = setOf(
+            "SUCCESS", "SUCCESSFUL", "COMPLETED", "PENDING", "FAILED", "APPROVED",
+            "CONFIRMED", "EXECUTED", "AED", "USD", "INR", "USDT", "AMOUNT", "PAID",
+            "DEBITED", "TRANSFER", "BANK", "PAYMENT", "ACCOUNT", "DATE", "TIME"
+        )
+
+        // If entire string is a clean alphanumeric code (with possible hyphens/slashes)
+        if (Pattern.compile("^[A-Za-z0-9\\-_/]{4,50}$").matcher(cleaned).matches()) {
+            if (!noiseWords.contains(cleaned.uppercase(Locale.US))) {
+                return cleaned
+            }
         }
-        // If the line contains words, pick the first token that looks like an ID
+
+        // Split tokens and find valid token
         val tokens = cleaned.split("\\s+".toRegex())
         for (token in tokens) {
-            val tClean = token.trim('(', ')', '[', ']', ':', '#', '-', '.')
-            if (tClean.length in 4..50 && tClean.any { it.isDigit() } && tClean.any { it.isLetter() || it == '-' }) {
-                return tClean
+            val tClean = token.trim('(', ')', '[', ']', ':', '#', '-', '.', ',')
+            if (tClean.length in 4..50 && !noiseWords.contains(tClean.uppercase(Locale.US))) {
+                // Must contain at least digits or valid reference structure
+                if (tClean.any { it.isDigit() } && (tClean.any { it.isLetter() } || tClean.contains("-") || tClean.length >= 8)) {
+                    return tClean
+                }
             }
         }
         return null
@@ -345,11 +435,19 @@ object TransactionScreenshotAnalyzer {
 
     private fun parseAmountFromSnippet(snippet: String): Double? {
         if (snippet.isBlank()) return null
-        // Match numbers like 25,000.00 or 25000 or 500.50
-        val pattern = Pattern.compile("(?:AED|USD|INR|USDT|[$₹د.إ])?\\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,4})?|[0-9]+(?:\\.[0-9]{1,4})?)")
-        val matcher = pattern.matcher(snippet)
+
+        // Ignore timestamps/dates like 2026/09/14, 14-09-2026, 18:06:21
+        val datePattern = Pattern.compile("\\b(?:20[2-3][0-9][\\-/\\.][0-9]{1,2}[\\-/\\.][0-9]{1,2}|[0-9]{1,2}[\\-/\\.][0-9]{1,2}[\\-/\\.]20[2-3][0-9]|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)\\b")
+        val cleanSnippet = datePattern.matcher(snippet).replaceAll(" ")
+
+        // Matches both prefix and postfix currencies: "AED 25,000.00", "25,000.00 AED", "5,000.00", "$5,000", "1,50,000.00"
+        val pattern = Pattern.compile(
+            "(?:AED|USD|INR|USDT|[$₹د.إ])?\\s*([0-9]{1,3}(?:[,\\s][0-9]{2,3})+(?:\\.[0-9]{1,4})?|[0-9]+(?:\\.[0-9]{1,4})?)\\s*(?:AED|USD|INR|USDT|[$₹د.إ])?",
+            Pattern.CASE_INSENSITIVE
+        )
+        val matcher = pattern.matcher(cleanSnippet)
         while (matcher.find()) {
-            val numStr = matcher.group(1)?.replace(",", "")?.trim()
+            val numStr = matcher.group(1)?.replace(",", "")?.replace(" ", "")?.trim()
             val parsed = numStr?.toDoubleOrNull()
             if (parsed != null && parsed > 0.0) {
                 return parsed

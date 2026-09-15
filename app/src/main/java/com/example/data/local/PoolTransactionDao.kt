@@ -54,6 +54,49 @@ interface PoolTransactionDao {
     @Query("SELECT * FROM pool_transactions WHERE referenceNo = :ref LIMIT 1")
     suspend fun getByReferenceNo(ref: String): PoolTransactionEntity?
 
+    @Query("SELECT * FROM pool_transactions WHERE referenceNo = :ref OR (idempotencyHash IS NOT NULL AND idempotencyHash = :hash) LIMIT 1")
+    suspend fun getByReferenceOrHash(ref: String, hash: String): PoolTransactionEntity?
+
+    @Query("UPDATE pool_transactions SET recordState = :recordState, secondApproverEmail = :checkerEmail, secondApprovalTimestamp = :timestamp, secondApprovalNotes = :notes WHERE id = :id")
+    suspend fun updateSecondApproval(
+        id: Long,
+        recordState: String,
+        checkerEmail: String,
+        timestamp: Long,
+        notes: String?
+    )
+
+    @Query("UPDATE pool_transactions SET settlementState = :settlementState, bankUtrNumber = :bankUtr, settlementTimestamp = :timestamp, reconciliationState = :reconState WHERE id = :id")
+    suspend fun updateSettlement(
+        id: Long,
+        settlementState: String,
+        bankUtr: String?,
+        timestamp: Long,
+        reconState: String
+    )
+
+    @Query("UPDATE pool_transactions SET reconciliationState = 'CONFIRMED_BY_USER' WHERE id = :id")
+    suspend fun updateConfirmReceipt(id: Long)
+
+    @Query("UPDATE pool_transactions SET reconciliationState = 'DISPUTED', disputeReason = :reason, disputeRaisedTimestamp = :timestamp WHERE id = :id")
+    suspend fun updateDispute(id: Long, reason: String, timestamp: Long)
+
+    @Query("UPDATE pool_transactions SET reconciliationState = :reconState, disputeResolvedTimestamp = :timestamp, disputeResolverEmail = :resolverEmail, disputeResolutionNotes = :resolutionNotes, notes = :updatedNotes WHERE id = :id")
+    suspend fun updateDisputeResolution(
+        id: Long,
+        reconState: String,
+        timestamp: Long,
+        resolverEmail: String,
+        resolutionNotes: String,
+        updatedNotes: String
+    )
+
+    @Query("SELECT * FROM pool_transactions WHERE reconciliationState = 'PENDING_USER_CONFIRM' AND settlementTimestamp IS NOT NULL AND settlementTimestamp <= :cutoffTimestamp")
+    suspend fun getPendingAutoReconciliation(cutoffTimestamp: Long): List<PoolTransactionEntity>
+
+    @Query("UPDATE pool_transactions SET reconciliationState = 'CONFIRMED_BY_TIMEOUT' WHERE id IN (:ids)")
+    suspend fun autoReconcileTimeouts(ids: List<Long>)
+
     @Query("UPDATE pool_transactions SET status = :status, reversalReason = :reason, reversedByEmail = :reversedBy, reversalTimestamp = :timestamp, notes = :notes WHERE id = :id")
     suspend fun updateReversal(
         id: Long,

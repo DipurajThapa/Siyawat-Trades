@@ -70,19 +70,66 @@ To prevent duplicate submissions or fraudulent receipts, the analyzer performs c
 
 ---
 
-## 5. Tracking the Pool Treasury Lifecycle
+## 5. 3-Tier Lifecycle State Machine Operations
 
-The central ledger tracks transactions through 6 distinct stages:
-1. **Capital Injection**: Contributor funds arriving in the central banking institution.
-2. **Bank to Exchange**: Liquid capital transferred to Binance / OKX fiat gateways.
-3. **Exchange to Crypto**: Fiat converted into stable collateral (USDT / USDC).
-4. **P2P Trading & Arbitrage**: Capital utilized in algorithmic market-making cycles.
-5. **Profit Realization**: Closed trading yield.
-6. **Disbursement**: Principal or dividend returns paid out to contributors.
+The application manages financial transitions through three decoupled, independent state tracks:
+
+### A. Record State (Internal Authorization)
+1. **Submission**: User or operator submits deposit/transfer. Record state is `SUBMITTED`.
+2. **Dual-Control High-Value Check**:
+   - If converted USD value is **≥ $10,000 USD**, the record automatically enters `PENDING_SECOND_APPROVAL`.
+   - The first admin acts as **Maker** (verifies receipt & signs off).
+   - A second, distinct admin acts as **Checker** (reviews verification & signs off).
+   - Self-approval by the Maker as Checker is strictly prevented.
+3. **Standard Approval**: Transactions < $10k require a single administrator sign-off to reach `APPROVED`.
+4. **Correction Requests**: If details require adjustment, admin marks `CORRECTION_REQUESTED`.
+
+### B. Settlement State (External Banking & Crypto Rails)
+1. **Unsettled / In-Transit**: Transaction is approved internally, but cash or crypto has not yet cleared external accounts.
+2. **Recording Settlement**:
+   - Admin opens the transaction card and taps **"Record Settlement"**.
+   - Admin enters the mandatory **Bank UTR (Unique Transaction Reference)** or **Blockchain TxHash**.
+   - System updates settlement state to `SETTLED`.
+
+### C. Reconciliation State (Beneficiary Confirmation & Disputes)
+1. **Confirmation Window**: As soon as settlement is recorded, state moves to `PENDING_USER_CONFIRM`.
+2. **User Confirmation**:
+   - The beneficiary (or depositor) taps **"Confirm Receipt"** once funds reflect in their bank or crypto wallet.
+   - Transaction reaches `CONFIRMED_BY_USER` and is fully reconciled.
+3. **Auto-Reconciliation SLA (72 Hours)**:
+   - If no dispute is raised within 72 hours of settlement, the transaction auto-reconciles as `CONFIRMED_BY_TIMEOUT`.
+4. **Disputes**:
+   - If funds did not arrive or amount is short, the user taps **"Raise Dispute"** and details the issue.
+   - Transaction is immediately tagged `DISPUTED` and escalated to the central admin queue.
+5. **Admin Dispute Adjudication**:
+   - Admin investigates the wire via bank UTR tracer.
+   - If payment is confirmed received: Admin notes tracer proof and marks resolved.
+   - If payment failed at banking rail: Admin notes failure; system executes a compensating reversal entry to restore ledger equilibrium.
 
 ---
 
-## 6. Disbursing Profits & Overdraw Safeguards
+## 6. FIFO USDT Inventory Engine & Lot Auditing
+
+1. **Lot Tracking**: Each purchase of USDT (Exchange to Crypto) records an individual inventory lot with acquisition price and remaining tokens.
+2. **Cost Basis & Realized P&L**: When USDT is sold or disbursed, the engine exhausts oldest lots first (First-In, First-Out), calculating exact realized profit/loss.
+3. **Audit Dialog**: Tap the **"FIFO Lots"** button in the bottom bar or Admin panel to view:
+   - Total active lots in inventory
+   - Remaining unliquidated USDT
+   - Weighted average acquisition cost
+   - Realized P&L across all closed lots
+
+---
+
+## 7. Fullscreen & Ergonomic Mobile Layout
+
+1. **Entering Fullscreen**: Tap the **"Fullscreen"** button in the bottom navigation bar.
+2. **Immersive Display**: Status and navigation bars hide, granting full vertical canvas for transaction ledgers and charts.
+3. **Display Cutout Accommodation**: On devices with notch or hole-punch cameras, the app extends edge-to-edge with `SHORT_EDGES` display mode.
+4. **Ergonomic Bottom Bar**: The User Switcher, Cloud Backup, and Fullscreen toggle are conveniently placed at the bottom within thumb's reach.
+
+---
+
+## 8. Disbursing Profits & Overdraw Safeguards
 
 1. Open the Admin Actions panel.
 2. Tap **"Disburse Funds"**.

@@ -203,21 +203,26 @@ fun UserRoleSwitcherDialog(
 
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 val roleColor = when (user.role) {
+                                    UserRole.SUPER_ADMIN -> Color(0xFF6366F1)
                                     UserRole.ADMIN -> MutedBluePrimary
                                     UserRole.SUB_ADMIN -> MutedBlueLight
                                     UserRole.MEMBER -> Color(0xFF94A3B8)
+                                    else -> Color(0xFF94A3B8)
                                 }
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
                                         .background(roleColor.copy(alpha = 0.2f))
                                         .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .testTag("user_role_chip_${user.email}")
                                 ) {
                                     Text(
                                         text = when (user.role) {
+                                            UserRole.SUPER_ADMIN -> "SUPER-ADMIN"
                                             UserRole.ADMIN -> "ADMIN"
                                             UserRole.SUB_ADMIN -> "SUB-ADMIN"
                                             UserRole.MEMBER -> "MEMBER"
+                                            else -> "MEMBER"
                                         },
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,

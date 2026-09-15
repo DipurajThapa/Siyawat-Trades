@@ -57,6 +57,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material3.Surface
+import com.example.ui.components.DisputeDialog
+import com.example.ui.components.FifoLotAuditDialog
+import com.example.ui.components.ResolveDisputeDialog
+import com.example.ui.components.SettlementDialog
+import com.example.ui.theme.PaperBorder
+import com.example.ui.theme.PaperCardElevated
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.PoolUser
 import com.example.data.model.TransactionStage
@@ -136,42 +145,7 @@ fun MainScreen(
                                 )
                             }
                         },
-                        actions = {
-                            if (onToggleFullScreen != null) {
-                                IconButton(
-                                    onClick = { onToggleFullScreen(!isFullScreen) },
-                                    modifier = Modifier.testTag("toggle_fullscreen_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                        contentDescription = if (isFullScreen) "Exit Full Screen" else "Enter Full Screen",
-                                        tint = MutedBlueDark
-                                    )
-                                }
-                            }
-
-                            IconButton(
-                                onClick = { viewModel.openDriveDialog() },
-                                modifier = Modifier.testTag("open_gdrive_dialog_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CloudDone,
-                                    contentDescription = "Google Drive Receipts",
-                                    tint = MutedBlueDark
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { viewModel.openUserSwitcher() },
-                                modifier = Modifier.testTag("manage_accounts_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ManageAccounts,
-                                    contentDescription = "Manage Roles & Accounts",
-                                    tint = TextSecondary
-                                )
-                            }
-                        },
+                        actions = {},
                         colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = MaterialTheme.colorScheme.surface
                         )
@@ -239,6 +213,100 @@ fun MainScreen(
                     }
                 }
             },
+            bottomBar = {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("main_bottom_bar"),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 4.dp,
+                    border = BorderStroke(1.dp, PaperBorder)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Left: Role / Account switcher button with user chip
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MutedBlueContainer)
+                                .border(1.dp, MutedBlueBorder, RoundedCornerShape(8.dp))
+                                .clickable { viewModel.openUserSwitcher() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .testTag("manage_accounts_btn"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Manage Roles & Accounts",
+                                tint = MutedBlueDark,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Column {
+                                Text(
+                                    text = uiState.currentUser.displayName,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MutedBlueDark
+                                )
+                                Text(
+                                    text = uiState.currentUser.role.name.replace("_", " "),
+                                    fontSize = 9.sp,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+
+                        // Right group: Cloud Backup & Fullscreen Toggle
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = { viewModel.openDriveDialog() },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(PaperCardElevated)
+                                    .border(1.dp, PaperBorder, RoundedCornerShape(8.dp))
+                                    .testTag("open_gdrive_dialog_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudDone,
+                                    contentDescription = "Google Drive Receipts",
+                                    tint = MutedBlueDark,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            if (onToggleFullScreen != null) {
+                                IconButton(
+                                    onClick = { onToggleFullScreen(!isFullScreen) },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(PaperCardElevated)
+                                        .border(1.dp, PaperBorder, RoundedCornerShape(8.dp))
+                                        .testTag("toggle_fullscreen_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFullScreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                        contentDescription = if (isFullScreen) "Exit Full Screen" else "Enter Full Screen",
+                                        tint = MutedBlueDark,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             floatingActionButton = {
                 // Extended FAB only for Admin Operations tab to prevent button collision on Member Dashboard
                 if (uiState.selectedTab == AppTab.ADMIN_OPS && uiState.currentUser.canManage) {
@@ -289,6 +357,18 @@ fun MainScreen(
                         },
                         onReverseTransaction = { tx ->
                             viewModel.openReverseDialog(tx)
+                        },
+                        onOpenFifoLotAudit = {
+                            viewModel.openFifoLotAudit()
+                        },
+                        onResolveDispute = { tx ->
+                            viewModel.openResolveDisputeDialog(tx)
+                        },
+                        onSecondApproval = { tx ->
+                            viewModel.verifyTransactionMakerChecker(tx.id, true)
+                        },
+                        onRecordSettlement = { tx ->
+                            viewModel.openSettleDialog(tx)
                         }
                     )
                 } else {
@@ -317,6 +397,12 @@ fun MainScreen(
                         },
                         onViewProofClick = { tx ->
                             viewModel.openProof(tx)
+                        },
+                        onConfirmReceipt = { txId ->
+                            viewModel.confirmUserReceipt(txId)
+                        },
+                        onDispute = { tx ->
+                            viewModel.openDisputeDialog(tx)
                         }
                     )
                 }
@@ -441,6 +527,60 @@ fun MainScreen(
             onConfirmReversal = { reason ->
                 viewModel.reverseTransaction(txToReverse.id, reason)
             }
+        )
+    }
+
+    // 9. Record Settlement Dialog
+    if (uiState.transactionToSettle != null) {
+        val txToSettle = uiState.transactionToSettle!!
+        SettlementDialog(
+            transaction = txToSettle,
+            onDismiss = { viewModel.closeSettleDialog() },
+            onConfirmSettlement = { bankUtr ->
+                viewModel.recordSettlement(
+                    txId = txToSettle.id,
+                    bankUtr = bankUtr
+                )
+            }
+        )
+    }
+
+    // 10. User Raise Dispute Dialog
+    if (uiState.transactionToDispute != null) {
+        val txToDispute = uiState.transactionToDispute!!
+        DisputeDialog(
+            transaction = txToDispute,
+            onDismiss = { viewModel.closeDisputeDialog() },
+            onSubmitDispute = { reason ->
+                viewModel.raiseDispute(
+                    txId = txToDispute.id,
+                    reason = reason
+                )
+            }
+        )
+    }
+
+    // 11. Admin Resolve Dispute Dialog
+    if (uiState.transactionToResolveDispute != null) {
+        val txToResolve = uiState.transactionToResolveDispute!!
+        ResolveDisputeDialog(
+            transaction = txToResolve,
+            onDismiss = { viewModel.closeResolveDisputeDialog() },
+            onResolve = { notes, isConfirmed ->
+                viewModel.resolveDispute(
+                    txId = txToResolve.id,
+                    notes = notes,
+                    isConfirmed = isConfirmed
+                )
+            }
+        )
+    }
+
+    // 12. FIFO Lot Audit Dialog
+    if (uiState.showFifoLotAuditDialog) {
+        FifoLotAuditDialog(
+            fifoResult = viewModel.getFifoLedgerResult(),
+            onDismiss = { viewModel.closeFifoLotAudit() }
         )
     }
 }

@@ -17,38 +17,48 @@
 
 ## ✨ Key Features
 
-### 1. Multi-Currency Treasury Management (AED, USD, INR)
-- **Real-Time & Historical Rate Locking**: Every capital injection locks the exact foreign exchange rate at the second of transaction execution, ensuring immutable book value reproducibility.
-- **Native AED Support**: Clean, un-duplicated currency notation throughout the interface (e.g. `AED 25,000`).
-- **Dynamic Valuation**: Pool totals, capital contributions, and trading yields are aggregated in real-time.
+### 1. 3-Tier Decoupled Lifecycle State Machine
+Financial integrity is enforced by decoupling transaction stages into three independent dimensions:
+- **Record State (Internal Authorization)**:
+  - `SUBMITTED`: Deposit or movement logged by member/operator.
+  - `PENDING_SECOND_APPROVAL`: Triggered automatically for high-value transactions (≥ $10,000 USD).
+  - `APPROVED`: Authorized by admin (or dual admins for high-value transfers).
+  - `REJECTED`: Declined by administrator with mandatory explanation.
+  - `CORRECTION_REQUESTED`: Sent back to submitter for revision.
+  - `VOIDED`: Cancelled prior to settlement execution.
+- **Settlement State (External Bank/Crypto Execution)**:
+  - `UNSETTLED`: Awaiting external fund transfer by treasury desk.
+  - `IN_TRANSIT`: External wire or exchange transfer in process.
+  - `SETTLED`: Confirmed with mandatory Bank UTR or Blockchain TxHash reference.
+  - `FAILED`: External wire bounced or rejected by banking rail.
+  - `REVERSED`: Compensating reversal transaction executed.
+- **Reconciliation State (End-to-End Delivery & Disputes)**:
+  - `PENDING_USER_CONFIRM`: Settlement recorded; 72-hour countdown window opened for beneficiary receipt confirmation.
+  - `CONFIRMED_BY_USER`: Beneficiary explicitly verified funds in destination account.
+  - `CONFIRMED_BY_TIMEOUT`: Auto-reconciled after 72-hour SLA window without dispute.
+  - `DISPUTED`: Beneficiary flagged non-delivery or amount discrepancy.
+  - `RECONCILED` / `UNRECONCILED`: Admin resolved dispute via bank tracer investigation.
 
-### 2. Six Sigma Zero-Loss Ledger
-- **Stage Lifecycle**:
-  - `Capital Injection` (Pool contributor deposits)
-  - `Bank to Exchange` (Wire transfer to Binance / OKX)
-  - `Exchange to Crypto` (USDT / USDC conversion)
-  - `P2P Trading` (Arbitrage & algorithmic trading cycle)
-  - `Profit / Loss Realization`
-  - `Distribution / Payout` (Liquid profit payouts with overdraw prevention)
-- **Overdraw Protection**: Automatic validation prevents admin distributions that exceed current available pool cash.
+### 2. High-Value Dual-Control Governance (Maker-Checker)
+- Any transaction with a converted value ≥ **$10,000 USD** automatically mandates two distinct administrative signatures.
+- **Maker**: First administrator approves the transaction details and attaches banking authorization.
+- **Checker**: A separate, distinct administrator must review and counter-sign before funds can be settled. The Maker cannot self-approve as Checker.
 
-### 3. Screenshot OCR & Fraud Detection
-- **Android Photo Picker**: Zero-permission media selection adhering strictly to modern Google Play privacy guidelines (`PickVisualMedia`).
-- **On-Device Vision & OCR**: Detects transaction amounts and bank reference IDs automatically from bank wire advice slips and exchange confirmations.
-- **Intelligent Field Extraction**: Automatically populates transaction fields with review cards.
-- **Missing Information Prompts**: Displays clear notifications if the amount or reference number cannot be determined with high confidence.
-- **Suspicious Activity Flagging**:
-  - Detects duplicate transaction IDs already recorded in the system.
-  - Flags mismatches between entered amounts and screenshot values.
-  - Detects malformed or test reference IDs.
-  - Flags entries as *"Potentially suspicious — requires verification"* for administrator audit.
+### 3. FIFO USDT Inventory Engine & Realized P&L
+- **First-In, First-Out (FIFO) Lot Accounting**: Every crypto acquisition (USDT purchase) creates an immutable lot with its acquisition timestamp, rate, quantity, and cost basis.
+- **Automated Lot Liquidation**: When selling or distributing USDT, the engine consumes oldest lots first, computing exact cost basis and realized profit or loss.
+- **Visual Lot Inspector**: Admins and members can inspect discrete active inventory lots, remaining quantities, and blended average costs via the **FIFO Lot Audit Dialog**.
 
-### 4. Immutable Audit Trail & Administrative Governance
-- **Role-Based Access Control**:
-  - **Admin**: Disburse returns, approve/verify pending transactions, manage members, perform rollbacks.
-  - **Member / Investor**: View pool ledger, submit deposits, review personal equity and historical yield.
-- **Mandatory Reversal Justifications**: Transactions cannot be arbitrarily deleted; status alterations and reversals require an audited reason.
-- **Export Capabilities**: Complete CSV ledger export for accounting and regulatory compliance.
+### 4. Robust Camera, Screenshots Folder & OCR Vision
+- **Zero-Crash FileProvider**: Standardized Android FileProvider architecture supporting app-internal cache, external cache, and dedicated screenshots directories.
+- **SAF Persistence Isolation**: Selected receipts and camera captures are safely duplicated to `context.cacheDir`, preventing URI permission drops.
+- **Fallback Image Decoders**: Resilient fallback to Android `BitmapFactory` ensures flawless OCR across Samsung, OnePlus, Xiaomi, and Google Pixel screenshot formats.
+- **International & Indian Numbering Formats**: ML Kit regex parses standard (`150,000.00`) and Indian lakhs/crores (`1,50,000.00`) accurately.
+
+### 5. Mobile-Ergonomic Fullscreen Experience
+- **Display Cutout Integration**: Seamless edge-to-edge support utilizing `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`.
+- **Adaptive System Bar Hiding**: Fullscreen toggle in the ergonomic bottom action bar hides system status and navigation bars with swipe-to-reveal gesture support.
+- **Clean Action Bar Layout**: Account switcher, cloud backup, and fullscreen controls positioned in the bottom navigation bar for comfortable one-handed mobile operation.
 
 ---
 

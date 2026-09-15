@@ -2,6 +2,9 @@ package com.example.data.local
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.example.data.model.ReconciliationState
+import com.example.data.model.RecordState
+import com.example.data.model.SettlementState
 import com.example.data.model.TransactionStage
 import com.example.data.model.TransactionStatus
 import java.text.SimpleDateFormat
@@ -61,7 +64,40 @@ data class PoolTransactionEntity(
     val resultingBalance: Double? = null,
     val reversalReason: String? = null,
     val reversedByEmail: String? = null,
-    val reversalTimestamp: Long? = null
+    val reversalTimestamp: Long? = null,
+
+    // Separated 3-Tier Lifecycle State Machine
+    val recordState: RecordState = if (status == TransactionStatus.REVERSED) RecordState.VOIDED
+        else if (status == TransactionStatus.FLAGGED) RecordState.CORRECTION_REQUESTED
+        else if (status == TransactionStatus.PENDING_VERIFICATION) RecordState.SUBMITTED
+        else RecordState.APPROVED,
+
+    val settlementState: SettlementState = if (status == TransactionStatus.REVERSED) SettlementState.REVERSED
+        else if (status == TransactionStatus.COMPLETED || status == TransactionStatus.VERIFIED) SettlementState.SETTLED
+        else SettlementState.UNSETTLED,
+
+    val reconciliationState: ReconciliationState = if (status == TransactionStatus.REVERSED) ReconciliationState.UNRECONCILED
+        else if (status == TransactionStatus.COMPLETED || status == TransactionStatus.VERIFIED) ReconciliationState.CONFIRMED_BY_USER
+        else ReconciliationState.UNRECONCILED,
+
+    // Maker-Checker Dual Signature (Mandatory for >= $10,000 / AED 35,000)
+    val secondApproverEmail: String? = null,
+    val secondApprovalTimestamp: Long? = null,
+    val secondApprovalNotes: String? = null,
+
+    // External Bank / Blockchain Settlement Evidence
+    val bankUtrNumber: String? = null,
+    val settlementTimestamp: Long? = if (status == TransactionStatus.COMPLETED || status == TransactionStatus.VERIFIED) timestamp else null,
+
+    // Dispute Handling & SLA Resolution
+    val disputeReason: String? = null,
+    val disputeRaisedTimestamp: Long? = null,
+    val disputeResolvedTimestamp: Long? = null,
+    val disputeResolverEmail: String? = null,
+    val disputeResolutionNotes: String? = null,
+
+    // Deterministic Idempotency Key (SHA-256 / composite hash)
+    val idempotencyHash: String? = null
 ) {
     /**
      * The locked USD value of this transaction.
@@ -70,11 +106,50 @@ data class PoolTransactionEntity(
     val lockedAmountUsd: Double
         get() = convertedAmountUsd
 
+    val isHighValue: Boolean
+        get() = lockedAmountUsd >= 10000.0
+
+    val isDualApprovalRequired: Boolean
+        get() = isHighValue && recordState == RecordState.PENDING_SECOND_APPROVAL
+
+    val isDisputed: Boolean
+        get() = reconciliationState == ReconciliationState.DISPUTED
+
+    val isAwaitingUserConfirm: Boolean
+        get() = settlementState == SettlementState.SETTLED && reconciliationState == ReconciliationState.PENDING_USER_CONFIRM
+
     /**
      * Converts the locked USD value into the user's current live display currency
      * using the current exchange rate.
      */
     fun getAmountInDisplayCurrency(currentRatePerUsd: Double): Double {
         return lockedAmountUsd * currentRatePerUsd
+    }
+
+    /**
+     * Formatted string showing either USDT or fiat amount with currency symbol
+     */
+    fun getDisplayAmount(): String {
+        return if (amountUsdt != null && amountUsdt > 0.0) {
+            String.format(Locale.US, "%,.2f USDT", amountUsdt)
+        } else {
+            val amount = amountFiat ?: 0.0
+            String.format(Locale.US, "%,.2f %s", amount, fiatCurrency)
+        }
+    }
+
+    fun getDisplayAmountString(): String = getDisplayAmount()
+
+    /**
+     * Privacy-safe account / reference masking
+     * e.g., AE1234567890 -> AE••••7890
+     */
+    fun getMaskedReference(): String {
+        val clean = referenceNo.trim()
+        return if (clean.length > 8) {
+            "${clean.take(2)}••••${clean.takeLast(4)}"
+        } else {
+            clean
+        }
     }
 }

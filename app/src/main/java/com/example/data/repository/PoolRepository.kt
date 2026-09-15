@@ -5,10 +5,16 @@ import com.example.data.local.PoolDatabase
 import com.example.data.local.PoolTransactionEntity
 import com.example.data.model.AlertSeverity
 import com.example.data.model.ComplianceAlert
+import com.example.data.model.FifoCalculationResult
+import com.example.data.model.FifoDepletionRecord
 import com.example.data.model.PoolMetrics
 import com.example.data.model.PoolUser
+import com.example.data.model.ReconciliationState
+import com.example.data.model.RecordState
+import com.example.data.model.SettlementState
 import com.example.data.model.TransactionStage
 import com.example.data.model.TransactionStatus
+import com.example.data.model.UsdtInventoryLot
 import com.example.data.model.UserRole
 import com.example.util.ProofReceiptGenerator
 import androidx.room.withTransaction
@@ -384,6 +390,51 @@ class PoolRepository(
             )
         }
 
+        // 6. User Disputed Transactions
+        val disputedTxs = transactions.filter { it.reconciliationState == ReconciliationState.DISPUTED }
+        if (disputedTxs.isNotEmpty()) {
+            alerts.add(
+                ComplianceAlert(
+                    id = "disputed_transactions",
+                    severity = AlertSeverity.CRITICAL,
+                    title = "User Dispute Flagged",
+                    message = "${disputedTxs.size} transaction(s) have active user disputes. Requires immediate bank UTR tracer and resolution.",
+                    actionText = "Review Disputes",
+                    affectedTransactionIds = disputedTxs.map { it.id }
+                )
+            )
+        }
+
+        // 7. Maker-Checker High-Value Dual Approval Queue
+        val dualApprovalTxs = transactions.filter { it.recordState == RecordState.PENDING_SECOND_APPROVAL }
+        if (dualApprovalTxs.isNotEmpty()) {
+            alerts.add(
+                ComplianceAlert(
+                    id = "dual_approval_queue",
+                    severity = AlertSeverity.WARNING,
+                    title = "Maker-Checker Sign-off Required",
+                    message = "${dualApprovalTxs.size} high-value transaction(s) ($10,000+) approved by Maker awaiting 2nd Admin Checker signature.",
+                    actionText = "Sign Off",
+                    affectedTransactionIds = dualApprovalTxs.map { it.id }
+                )
+            )
+        }
+
+        // 8. Settlements Awaiting User Delivery Confirmation
+        val awaitingConfirmTxs = transactions.filter { it.isAwaitingUserConfirm }
+        if (awaitingConfirmTxs.isNotEmpty()) {
+            alerts.add(
+                ComplianceAlert(
+                    id = "awaiting_user_confirm",
+                    severity = AlertSeverity.INFO,
+                    title = "Pending Delivery Confirmation",
+                    message = "${awaitingConfirmTxs.size} payout(s) marked Settled, awaiting member confirmation (72h SLA window active).",
+                    actionText = "View Payouts",
+                    affectedTransactionIds = awaitingConfirmTxs.map { it.id }
+                )
+            )
+        }
+
         return alerts
     }
 
@@ -486,7 +537,11 @@ class PoolRepository(
                 displayCurrencyAtTime = if (isUsdt) "USDT" else currency,
                 fiatExchangeRate = 1.0,
                 convertedAmountUsd = amount,
-                resultingBalance = resultingBalance
+                resultingBalance = resultingBalance,
+                recordState = RecordState.APPROVED,
+                settlementState = SettlementState.SETTLED,
+                reconciliationState = ReconciliationState.PENDING_USER_CONFIRM,
+                settlementTimestamp = now
             )
 
             val insertedId = dao.insertTransaction(entity)
@@ -530,6 +585,382 @@ class PoolRepository(
             )
 
             Result.success(Unit)
+        }
+    }
+
+    /**
+     * FIFO (First-In, First-Out) Inventory Engine for USDT Acquisition and Liquidation.
+     * Computes exact cost basis and realized P&L across discrete purchase lots.
+     */
+    fun calculateFifoLedger(
+        transactions: List<PoolTransactionEntity>
+    ): FifoCalculationResult {
+        val validTxs = transactions
+            .filter { it.status != TransactionStatus.CANCELLED && it.status != TransactionStatus.REVERSED }
+            .sortedBy { it.timestamp }
+
+        val activeLots = mutableListOf<UsdtInventoryLot>()
+        val depletions = mutableListOf<FifoDepletionRecord>()
+        var totalPurchased = 0.0
+        var totalSold = 0.0
+        var totalCostBasisOfSold = 0.0
+        var totalProceeds = 0.0
+        var totalFeesFiat = 0.0
+
+        for (tx in validTxs) {
+            val lockedUsd = if (tx.convertedAmountUsd > 0.0) tx.convertedAmountUsd else (tx.amountFiat ?: 0.0)
+
+            when (tx.stage) {
+                TransactionStage.USDT_ACQUISITION -> {
+                    val grossUsdt = tx.amountUsdt ?: 0.0
+                    val feeUsdt = tx.fee ?: 0.0
+                    val netUsdt = (grossUsdt - feeUsdt).coerceAtLeast(0.0)
+                    if (netUsdt > 0.0) {
+                        val unitCost = if (grossUsdt > 0.0) lockedUsd / grossUsdt else 1.0
+                        val lot = UsdtInventoryLot(
+                            lotId = "LOT-${tx.id}-${tx.referenceNo.take(6)}",
+                            acquisitionTxId = tx.id,
+                            timestamp = tx.timestamp,
+                            originalQuantity = netUsdt,
+                            remainingQuantity = netUsdt,
+                            unitCostFiat = unitCost,
+                            fiatCurrency = tx.fiatCurrency,
+                            feeUsdt = feeUsdt,
+                            exchangeRef = tx.referenceNo
+                        )
+                        activeLots.add(lot)
+                        totalPurchased += netUsdt
+                        totalFeesFiat += (feeUsdt * unitCost)
+                    }
+                }
+                TransactionStage.LIQUIDATION -> {
+                    var qtyToDeplete = tx.amountUsdt ?: 0.0
+                    val saleProceeds = lockedUsd
+                    totalSold += qtyToDeplete
+                    totalProceeds += saleProceeds
+                    val unitSaleRate = if (qtyToDeplete > 0.0) saleProceeds / qtyToDeplete else 1.0
+
+                    var i = 0
+                    while (qtyToDeplete > 0.000001 && i < activeLots.size) {
+                        val currentLot = activeLots[i]
+                        if (currentLot.remainingQuantity <= 0.000001) {
+                            i++
+                            continue
+                        }
+
+                        val depleteAmount = minOf(qtyToDeplete, currentLot.remainingQuantity)
+                        val lotCostBasis = depleteAmount * currentLot.unitCostFiat
+                        val lotProceeds = depleteAmount * unitSaleRate
+                        val lotGainLoss = lotProceeds - lotCostBasis
+
+                        depletions.add(
+                            FifoDepletionRecord(
+                                liquidationTxId = tx.id,
+                                lotId = currentLot.lotId,
+                                quantityDepleted = depleteAmount,
+                                unitCostFiat = currentLot.unitCostFiat,
+                                unitSaleFiat = unitSaleRate,
+                                grossGainLossFiat = lotGainLoss,
+                                timestamp = tx.timestamp
+                            )
+                        )
+
+                        totalCostBasisOfSold += lotCostBasis
+                        qtyToDeplete -= depleteAmount
+                        activeLots[i] = currentLot.copy(
+                            remainingQuantity = (currentLot.remainingQuantity - depleteAmount).coerceAtLeast(0.0)
+                        )
+                        i++
+                    }
+                }
+                else -> Unit
+            }
+        }
+
+        val remainingInventory = activeLots.sumOf { it.remainingQuantity }
+        val netRealizedPnL = totalProceeds - totalCostBasisOfSold - totalFeesFiat
+
+        return FifoCalculationResult(
+            totalUsdtPurchased = totalPurchased,
+            totalUsdtSold = totalSold,
+            remainingUsdtInventory = remainingInventory,
+            totalRealizedGainLossFiat = netRealizedPnL,
+            totalCostBasisOfSoldUsdt = totalCostBasisOfSold,
+            totalSaleProceedsFiat = totalProceeds,
+            totalFeesFiat = totalFeesFiat,
+            activeLots = activeLots.filter { it.remainingQuantity > 0.000001 },
+            depletions = depletions
+        )
+    }
+
+    /**
+     * Deterministic idempotency hash to prevent accidental duplicate submission.
+     */
+    fun generateIdempotencyHash(
+        userEmail: String,
+        amount: Double,
+        currency: String,
+        referenceNo: String
+    ): String {
+        val raw = "${userEmail.trim().lowercase()}_${String.format(Locale.US, "%.4f", amount)}_${currency.trim().uppercase()}_${referenceNo.trim().uppercase()}"
+        return try {
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            val digest = md.digest(raw.toByteArray())
+            digest.joinToString("") { "%02x".format(it) }.take(16)
+        } catch (e: Exception) {
+            raw.hashCode().toString()
+        }
+    }
+
+    suspend fun isDuplicateTransaction(referenceNo: String, idempotencyHash: String): Boolean {
+        if (referenceNo.isBlank() && idempotencyHash.isBlank()) return false
+        return withContext(Dispatchers.IO) {
+            dao.getByReferenceOrHash(referenceNo.trim(), idempotencyHash) != null
+        }
+    }
+
+    /**
+     * Maker-Checker Dual Verification.
+     * High-value transactions (>= $10,000 USD) require approval from two distinct administrators.
+     */
+    suspend fun verifyTransactionWithMakerChecker(
+        id: Long,
+        adminUser: PoolUser,
+        verified: Boolean,
+        notes: String? = null,
+        approvalScreenshotUri: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        database.withTransaction {
+            if (!adminUser.isAdmin) {
+                return@withTransaction Result.failure(IllegalStateException("Unauthorized: Only admins can verify transactions."))
+            }
+
+            val tx = dao.getTransactionById(id)
+                ?: return@withTransaction Result.failure(IllegalArgumentException("Transaction not found."))
+
+            val now = System.currentTimeMillis()
+            val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(now))
+
+            if (!verified) {
+                // Outright rejection
+                dao.updateApproval(
+                    id = id,
+                    status = TransactionStatus.FLAGGED.name,
+                    verifiedBy = adminUser.email,
+                    approvalStatus = "REJECTED",
+                    approvalTimestamp = now,
+                    approvalDate = dateStr,
+                    approvalNotes = notes ?: "Rejected by Admin ${adminUser.displayName}",
+                    approvalScreenshotUri = approvalScreenshotUri
+                )
+                return@withTransaction Result.success("Transaction rejected.")
+            }
+
+            // If high value and pending second approval
+            if (tx.isHighValue && tx.recordState == RecordState.PENDING_SECOND_APPROVAL) {
+                // Ensure second checker is NOT the same person as maker
+                if (tx.verifiedByEmail?.equals(adminUser.email, ignoreCase = true) == true) {
+                    return@withTransaction Result.failure(
+                        IllegalStateException("Dual-Control Violation: Checker must be a different administrator than the Maker (${tx.verifiedByEmail}).")
+                    )
+                }
+
+                // Checker signs off -> final approval
+                dao.updateApproval(
+                    id = id,
+                    status = TransactionStatus.VERIFIED.name,
+                    verifiedBy = tx.verifiedByEmail ?: adminUser.email,
+                    approvalStatus = "APPROVED",
+                    approvalTimestamp = tx.approvalTimestamp ?: now,
+                    approvalDate = tx.approvalDate ?: dateStr,
+                    approvalNotes = "${tx.approvalNotes ?: "Approved by Maker"} | Checker Sign-off by ${adminUser.displayName}: ${notes ?: "Dual-signature confirmed"}",
+                    approvalScreenshotUri = approvalScreenshotUri ?: tx.approvalScreenshotUri
+                )
+                dao.updateSecondApproval(
+                    id = id,
+                    recordState = RecordState.APPROVED.name,
+                    checkerEmail = adminUser.email,
+                    timestamp = now,
+                    notes = notes ?: "Checker dual signature authorized."
+                )
+                return@withTransaction Result.success("High-value transaction fully approved with Maker-Checker dual signature.")
+            } else if (tx.isHighValue && tx.recordState != RecordState.APPROVED) {
+                // High-value first approval (Maker stage)
+                dao.updateApproval(
+                    id = id,
+                    status = TransactionStatus.PENDING_VERIFICATION.name,
+                    verifiedBy = adminUser.email,
+                    approvalStatus = "MAKER_APPROVED",
+                    approvalTimestamp = now,
+                    approvalDate = dateStr,
+                    approvalNotes = "Maker initial sign-off by ${adminUser.displayName}: ${notes ?: "Pending 2nd Admin Checker"}",
+                    approvalScreenshotUri = approvalScreenshotUri
+                )
+                dao.updateSecondApproval(
+                    id = id,
+                    recordState = RecordState.PENDING_SECOND_APPROVAL.name,
+                    checkerEmail = "",
+                    timestamp = 0L,
+                    notes = null
+                )
+                return@withTransaction Result.success("Maker signature recorded. Transaction placed in Dual Approval Queue for 2nd Admin Checker.")
+            } else {
+                // Standard transaction (< $10k) single admin approval
+                dao.updateApproval(
+                    id = id,
+                    status = TransactionStatus.VERIFIED.name,
+                    verifiedBy = adminUser.email,
+                    approvalStatus = "APPROVED",
+                    approvalTimestamp = now,
+                    approvalDate = dateStr,
+                    approvalNotes = notes ?: "Confirmed received in central bank account",
+                    approvalScreenshotUri = approvalScreenshotUri
+                )
+                dao.updateSecondApproval(
+                    id = id,
+                    recordState = RecordState.APPROVED.name,
+                    checkerEmail = adminUser.email,
+                    timestamp = now,
+                    notes = "Single sign-off approved."
+                )
+                return@withTransaction Result.success("Transaction approved successfully.")
+            }
+        }
+    }
+
+    /**
+     * Records external settlement execution with bank UTR or blockchain TxHash.
+     */
+    suspend fun recordSettlement(
+        id: Long,
+        operatorUser: PoolUser,
+        bankUtr: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!operatorUser.canManage) {
+            return@withContext Result.failure(IllegalStateException("Unauthorized: Only Admins or Sub-Admins can record settlement."))
+        }
+        val cleanUtr = bankUtr.trim()
+        if (cleanUtr.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Bank UTR / Transaction Hash is mandatory."))
+        }
+
+        val now = System.currentTimeMillis()
+        dao.updateSettlement(
+            id = id,
+            settlementState = SettlementState.SETTLED.name,
+            bankUtr = cleanUtr,
+            timestamp = now,
+            reconState = ReconciliationState.PENDING_USER_CONFIRM.name
+        )
+        Result.success(Unit)
+    }
+
+    /**
+     * User confirms receipt of settled funds or USDT.
+     */
+    suspend fun confirmUserReceipt(
+        id: Long,
+        currentUser: PoolUser
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        val tx = dao.getTransactionById(id)
+            ?: return@withContext Result.failure(IllegalArgumentException("Transaction not found."))
+
+        // Ensure only recipient, sender or admin can confirm receipt
+        val isAuthorized = currentUser.isAdmin ||
+                currentUser.email.equals(tx.recipientEmail, ignoreCase = true) ||
+                currentUser.email.equals(tx.userEmail, ignoreCase = true)
+
+        if (!isAuthorized) {
+            return@withContext Result.failure(IllegalStateException("Unauthorized: Only the beneficiary can confirm receipt."))
+        }
+
+        dao.updateConfirmReceipt(id)
+        Result.success(Unit)
+    }
+
+    /**
+     * User raises dispute if funds were not received or amount is incorrect.
+     */
+    suspend fun raiseDispute(
+        id: Long,
+        currentUser: PoolUser,
+        reason: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (reason.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Dispute reason is mandatory."))
+        }
+        val tx = dao.getTransactionById(id)
+            ?: return@withContext Result.failure(IllegalArgumentException("Transaction not found."))
+
+        val isAuthorized = currentUser.isAdmin ||
+                currentUser.email.equals(tx.recipientEmail, ignoreCase = true) ||
+                currentUser.email.equals(tx.userEmail, ignoreCase = true)
+
+        if (!isAuthorized) {
+            return@withContext Result.failure(IllegalStateException("Unauthorized: Only the beneficiary can raise a dispute."))
+        }
+
+        dao.updateDispute(id, reason.trim(), System.currentTimeMillis())
+        Result.success(Unit)
+    }
+
+    /**
+     * Admin resolves a dispute after reviewing bank UTR tracking.
+     */
+    suspend fun resolveDispute(
+        id: Long,
+        adminUser: PoolUser,
+        resolutionNotes: String,
+        isConfirmed: Boolean
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (!adminUser.isAdmin) {
+            return@withContext Result.failure(IllegalStateException("Unauthorized: Only admins can resolve disputes."))
+        }
+        if (resolutionNotes.isBlank()) {
+            return@withContext Result.failure(IllegalArgumentException("Resolution notes are mandatory."))
+        }
+
+        val tx = dao.getTransactionById(id)
+            ?: return@withContext Result.failure(IllegalArgumentException("Transaction not found."))
+
+        val now = System.currentTimeMillis()
+        val reconState = if (isConfirmed) ReconciliationState.RECONCILED.name else ReconciliationState.UNRECONCILED.name
+        val updatedNotes = "${tx.notes} | DISPUTE RESOLVED: $resolutionNotes by ${adminUser.displayName}"
+
+        dao.updateDisputeResolution(
+            id = id,
+            reconState = reconState,
+            timestamp = now,
+            resolverEmail = adminUser.email,
+            resolutionNotes = resolutionNotes,
+            updatedNotes = updatedNotes
+        )
+
+        // If funds were confirmed not delivered, execute compensating reversal
+        if (!isConfirmed) {
+            reverseTransaction(
+                adminUser = adminUser,
+                transactionId = id,
+                reason = "Dispute resolution: payment confirmed failed by bank. $resolutionNotes"
+            )
+        }
+
+        Result.success(Unit)
+    }
+
+    /**
+     * Auto-reconciliation SLA (72 hours default):
+     * Settled payments with no dispute after cutoff window are marked CONFIRMED_BY_TIMEOUT.
+     */
+    suspend fun autoReconcileTimeouts(cutoffHours: Int = 72): Result<Int> = withContext(Dispatchers.IO) {
+        val cutoffTimestamp = System.currentTimeMillis() - (cutoffHours * 3600 * 1000L)
+        val pendingTxs = dao.getPendingAutoReconciliation(cutoffTimestamp)
+        if (pendingTxs.isNotEmpty()) {
+            val ids = pendingTxs.map { it.id }
+            dao.autoReconcileTimeouts(ids)
+            Result.success(ids.size)
+        } else {
+            Result.success(0)
         }
     }
 }

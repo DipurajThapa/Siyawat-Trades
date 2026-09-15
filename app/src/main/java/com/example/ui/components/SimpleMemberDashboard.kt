@@ -53,6 +53,10 @@ import com.example.data.model.PoolUser
 import com.example.data.model.TimePeriod
 import com.example.data.model.TransactionStage
 import com.example.data.model.TransactionStatus
+import com.example.data.model.SettlementState
+import com.example.data.model.ReconciliationState
+import androidx.compose.material.icons.filled.ReportProblem
+import androidx.compose.material.icons.filled.ThumbUp
 import com.example.ui.theme.AmberBorder
 import com.example.ui.theme.AmberContainer
 import com.example.ui.theme.AmberTertiary
@@ -131,7 +135,9 @@ fun SimpleMemberDashboard(
     onSelectFilter: (com.example.data.model.TimePeriodFilter) -> Unit = {},
     onAddMoneyClick: () -> Unit,
     onDownloadSheetClick: () -> Unit,
-    onViewProofClick: (PoolTransactionEntity) -> Unit
+    onViewProofClick: (PoolTransactionEntity) -> Unit,
+    onConfirmReceipt: (Long) -> Unit = {},
+    onDispute: (PoolTransactionEntity) -> Unit = {}
 ) {
     val context = LocalContext.current
     var showApprovedOnly by remember { mutableStateOf(false) }
@@ -791,9 +797,12 @@ fun SimpleMemberDashboard(
             items(displayedTransactions, key = { it.id }) { tx ->
                 SimpleTransactionRow(
                     tx = tx,
+                    currentUser = currentUser,
                     activeCurrency = activeCurrency,
                     activeRate = activeRate,
-                    onViewProof = { onViewProofClick(tx) }
+                    onViewProof = { onViewProofClick(tx) },
+                    onConfirmReceipt = { onConfirmReceipt(tx.id) },
+                    onDispute = { onDispute(tx) }
                 )
             }
         }
@@ -803,9 +812,12 @@ fun SimpleMemberDashboard(
 @Composable
 fun SimpleTransactionRow(
     tx: PoolTransactionEntity,
+    currentUser: PoolUser? = null,
     activeCurrency: com.example.data.model.AppCurrency = com.example.data.model.AppCurrency.USD,
     activeRate: Double = 1.0,
-    onViewProof: () -> Unit
+    onViewProof: () -> Unit,
+    onConfirmReceipt: () -> Unit = {},
+    onDispute: () -> Unit = {}
 ) {
     val isInjection = tx.stage == TransactionStage.CAPITAL_INJECTION
     val isLiquidation = tx.stage == TransactionStage.LIQUIDATION
@@ -1094,6 +1106,116 @@ fun SimpleTransactionRow(
                         fontWeight = FontWeight.SemiBold,
                         color = MutedBlueDark
                     )
+                }
+            }
+
+            // Settlement UTR and Reconciliation Status Badges
+            if (tx.bankUtrNumber != null || tx.reconciliationState == ReconciliationState.DISPUTED || tx.reconciliationState == ReconciliationState.RECONCILED) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (tx.bankUtrNumber != null) {
+                        Text(
+                            text = "UTR: ${tx.bankUtrNumber}",
+                            fontFamily = Montserrat,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MutedBlueDark
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.width(1.dp))
+                    }
+
+                    when (tx.reconciliationState) {
+                        ReconciliationState.DISPUTED -> {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(RestrainedRedContainer)
+                                    .border(1.dp, RestrainedRedBorder, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.ReportProblem, contentDescription = null, tint = RestrainedRed, modifier = Modifier.size(10.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Disputed", fontFamily = Montserrat, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = RestrainedRed)
+                            }
+                        }
+                        ReconciliationState.RECONCILED -> {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(ProfitGreenContainer)
+                                    .border(1.dp, ProfitGreenBorder, RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = ProfitGreen, modifier = Modifier.size(10.dp))
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Reconciled", fontFamily = Montserrat, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = ProfitGreen)
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+            }
+
+            // Member Action: If settled and pending user confirmation, allow Confirm or Dispute
+            val isUserBeneficiaryOrOwner = currentUser != null && (
+                currentUser.email.equals(tx.userEmail, ignoreCase = true) ||
+                currentUser.email.equals(tx.recipientEmail, ignoreCase = true) ||
+                currentUser.canManage
+            )
+            if (tx.settlementState == SettlementState.SETTLED && tx.reconciliationState == ReconciliationState.PENDING_USER_CONFIRM && isUserBeneficiaryOrOwner) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = AmberContainer.copy(alpha = 0.5f)),
+                    border = BorderStroke(1.dp, AmberBorder),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "Funds dispatched via external bank/crypto. Have you received this transfer?",
+                            fontFamily = Montserrat,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = TextPrimary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onConfirmReceipt,
+                                modifier = Modifier.weight(1f).height(32.dp).testTag("confirm_receipt_btn_${tx.id}"),
+                                colors = ButtonDefaults.buttonColors(containerColor = ProfitGreen),
+                                shape = RoundedCornerShape(6.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Icon(Icons.Default.ThumbUp, contentDescription = null, modifier = Modifier.size(12.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Confirm Receipt", fontFamily = Montserrat, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = onDispute,
+                                modifier = Modifier.weight(1f).height(32.dp).testTag("dispute_btn_${tx.id}"),
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, RestrainedRed),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = RestrainedRed),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Icon(Icons.Default.ReportProblem, contentDescription = null, modifier = Modifier.size(12.dp), tint = RestrainedRed)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Dispute", fontFamily = Montserrat, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = RestrainedRed)
+                            }
+                        }
+                    }
                 }
             }
         }

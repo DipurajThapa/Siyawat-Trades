@@ -75,7 +75,13 @@ import com.example.util.FormatUtils
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.material.icons.filled.Gavel
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.ReportProblem
 import androidx.compose.material.icons.filled.Replay
+import com.example.data.model.RecordState
+import com.example.data.model.ReconciliationState
+import com.example.data.model.SettlementState
 
 @Composable
 fun AdminOperationsPanel(
@@ -89,11 +95,23 @@ fun AdminOperationsPanel(
     onOpenOperation: (TransactionStage) -> Unit,
     onViewProofClick: (PoolTransactionEntity) -> Unit,
     onOpenDistributeMoney: () -> Unit = {},
-    onReverseTransaction: (PoolTransactionEntity) -> Unit = {}
+    onReverseTransaction: (PoolTransactionEntity) -> Unit = {},
+    onOpenFifoLotAudit: () -> Unit = {},
+    onResolveDispute: (PoolTransactionEntity) -> Unit = {},
+    onSecondApproval: (PoolTransactionEntity) -> Unit = {},
+    onRecordSettlement: (PoolTransactionEntity) -> Unit = {}
 ) {
     val pendingInjections = transactions.filter {
         it.stage == TransactionStage.CAPITAL_INJECTION && 
-        (it.status == TransactionStatus.PENDING_VERIFICATION || it.approvalStatus == "PENDING")
+        (it.status == TransactionStatus.PENDING_VERIFICATION || it.approvalStatus == "PENDING" || it.recordState == RecordState.SUBMITTED)
+    }
+
+    val activeDisputes = transactions.filter {
+        it.reconciliationState == ReconciliationState.DISPUTED
+    }
+
+    val dualApprovalQueue = transactions.filter {
+        it.recordState == RecordState.PENDING_SECOND_APPROVAL
     }
 
     val approvedTransactions = transactions.filter {
@@ -183,6 +201,187 @@ fun AdminOperationsPanel(
                     periodSummary = periodSummary,
                     onSelectFilter = onSelectFilter
                 )
+            }
+        }
+
+        // Active Disputes Section (if any exist)
+        if (activeDisputes.isNotEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("active_disputes_card"),
+                    colors = CardDefaults.cardColors(containerColor = RestrainedRedContainer),
+                    border = BorderStroke(1.dp, RestrainedRedBorder),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.ReportProblem,
+                                contentDescription = null,
+                                tint = RestrainedRed,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "ACTIVE DISPUTES AWAITING ADJUDICATION (${activeDisputes.size})",
+                                fontWeight = FontWeight.Bold,
+                                color = RestrainedRed,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Traders or members flagged payments as uncredited. Investigate bank UTR traces or issue compensating reversals.",
+                            fontSize = 11.sp,
+                            color = TextPrimary
+                        )
+                    }
+                }
+            }
+            items(activeDisputes, key = { "dispute_${it.id}" }) { tx ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dispute_item_${tx.id}"),
+                    colors = CardDefaults.cardColors(containerColor = SlateCard),
+                    border = BorderStroke(1.dp, RestrainedRedBorder.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Dispute on Ref #${tx.referenceNo}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = tx.getDisplayAmount(),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = RestrainedRed
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Reason: ${tx.disputeReason ?: "Non-delivery reported"}",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { onResolveDispute(tx) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(34.dp)
+                                .testTag("admin_adjudicate_btn_${tx.id}"),
+                            colors = ButtonDefaults.buttonColors(containerColor = RestrainedRed),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Investigate & Adjudicate Dispute", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Maker-Checker Dual Approval Queue (if any exist)
+        if (dualApprovalQueue.isNotEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dual_approval_card"),
+                    colors = CardDefaults.cardColors(containerColor = AmberContainer),
+                    border = BorderStroke(1.dp, AmberTertiary.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Gavel,
+                                contentDescription = null,
+                                tint = AmberTertiary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "MAKER-CHECKER DUAL APPROVAL QUEUE (${dualApprovalQueue.size})",
+                                fontWeight = FontWeight.Bold,
+                                color = AmberTertiary,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "High-value transactions ($10,000+) require sign-off by a 2nd administrator.",
+                            fontSize = 11.sp,
+                            color = TextPrimary
+                        )
+                    }
+                }
+            }
+            items(dualApprovalQueue, key = { "dual_${it.id}" }) { tx ->
+                val isSameAsMaker = currentUser.email.equals(tx.verifiedByEmail, ignoreCase = true)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dual_item_${tx.id}"),
+                    colors = CardDefaults.cardColors(containerColor = SlateCard),
+                    border = BorderStroke(1.dp, AmberTertiary.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Ref #${tx.referenceNo} • ${tx.stage.title}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = tx.getDisplayAmount(),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = AmberTertiary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "Maker 1st approval by: ${tx.verifiedByEmail ?: "Admin"}",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (isSameAsMaker) {
+                            Text(
+                                text = "Dual control policy: A different administrator must sign as Checker.",
+                                fontSize = 11.sp,
+                                color = AmberTertiary
+                            )
+                        } else {
+                            Button(
+                                onClick = { onSecondApproval(tx) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(34.dp)
+                                    .testTag("admin_checker_signoff_${tx.id}"),
+                                colors = ButtonDefaults.buttonColors(containerColor = AmberTertiary, contentColor = Color.Black),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("Sign Off as 2nd Checker", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -439,6 +638,18 @@ fun AdminOperationsPanel(
                     onClick = { onOpenOperation(TransactionStage.LIQUIDATION) },
                     testTag = "op_liquidation"
                 )
+
+                // Operation 5: FIFO Inventory Engine & Lot Audit
+                AdminOpActionCard(
+                    icon = Icons.Default.Inventory2,
+                    iconTint = MutedBlueDark,
+                    iconContainer = MutedBlueContainer,
+                    title = "FIFO Inventory Engine & Lot Audit",
+                    subtitle = "Track discrete acquisition lots, remaining USDT quantities, unit cost, and realized P&L",
+                    badgeText = "FIFO Cost-Basis Engine",
+                    onClick = { onOpenFifoLotAudit() },
+                    testTag = "op_fifo_lot_audit"
+                )
             }
         }
 
@@ -663,6 +874,62 @@ fun AdminOperationsPanel(
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text(
                                             text = "Reverse",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = RestrainedRed
+                                        )
+                                    }
+                                }
+
+                                // Record Settlement button if pending settlement
+                                if (currentUser.isAdmin && (tx.settlementState == SettlementState.UNSETTLED || tx.settlementState == SettlementState.IN_TRANSIT) && !isReversed) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(MutedBlueContainer)
+                                            .border(1.dp, MutedBlueBorder, RoundedCornerShape(6.dp))
+                                            .clickable { onRecordSettlement(tx) }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            .testTag("record_settle_btn_${tx.id}"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AccountBalance,
+                                            contentDescription = null,
+                                            tint = MutedBlueDark,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Record Settlement",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MutedBlueDark
+                                        )
+                                    }
+                                }
+
+                                // Adjudicate Dispute button if disputed
+                                if (currentUser.isAdmin && tx.reconciliationState == ReconciliationState.DISPUTED) {
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(RestrainedRedContainer)
+                                            .border(1.dp, RestrainedRedBorder, RoundedCornerShape(6.dp))
+                                            .clickable { onResolveDispute(tx) }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                            .testTag("audit_adjudicate_btn_${tx.id}"),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Gavel,
+                                            contentDescription = null,
+                                            tint = RestrainedRed,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Adjudicate",
                                             fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = RestrainedRed

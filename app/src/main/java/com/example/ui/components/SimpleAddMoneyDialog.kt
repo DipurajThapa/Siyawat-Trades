@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -26,19 +27,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -123,53 +129,134 @@ fun SimpleAddMoneyDialog(
     val parsedAmount = amountInput.toDoubleOrNull() ?: 0.0
     val lockedUsd = if (selectedCurrency == AppCurrency.USD) parsedAmount else if (currentRate > 0) parsedAmount / currentRate else 0.0
 
-    // Standard Android Photo Picker for Photos/Gallery/Image Library
+    var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    fun handleSelectedImageUri(uri: Uri) {
+        proofUriObject = uri
+        val destFile = File(context.cacheDir, "proof_user_${System.currentTimeMillis()}.png")
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                destFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            proofPath = destFile.absolutePath
+            errorMessage = null
+
+            // Perform OCR & Vision Analysis on the selected transaction screenshot using locally saved copy
+            isAnalyzingScreenshot = true
+            coroutineScope.launch {
+                val result = TransactionScreenshotAnalyzer.analyzeScreenshot(
+                    context = context,
+                    imageUri = Uri.fromFile(destFile),
+                    currentlyEnteredAmount = amountInput.toDoubleOrNull(),
+                    selectedCurrency = selectedCurrency,
+                    checkDuplicateTxId = checkDuplicateTxId
+                )
+                isAnalyzingScreenshot = false
+                analysisResult = result
+
+                // Automatically populate empty fields with extracted data
+                if (result.extractedAmount != null && amountInput.isBlank()) {
+                    amountInput = if (result.extractedAmount % 1.0 == 0.0) {
+                        result.extractedAmount.toLong().toString()
+                    } else {
+                        result.extractedAmount.toString()
+                    }
+                }
+
+                if (result.extractedReferenceId != null && referenceInput.isBlank()) {
+                    referenceInput = result.extractedReferenceId
+                }
+            }
+        } catch (e: Exception) {
+            errorMessage = "Failed to load image: ${e.localizedMessage ?: "File error"}"
+            isAnalyzingScreenshot = false
+        }
+    }
+
+    // 1. Android Photo Picker (Gallery / Photos)
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
-            proofUriObject = uri
-            val destFile = File(context.cacheDir, "proof_user_${System.currentTimeMillis()}.png")
+            handleSelectedImageUri(uri)
+        }
+    }
+
+    // 2. Storage Access Framework (Direct access to Screenshots folder, Downloads, and files)
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            handleSelectedImageUri(uri)
+        }
+    }
+
+    fun launchScreenshotsFolder() {
+        try {
+            filePickerLauncher.launch("image/*")
+        } catch (e: Exception) {
             try {
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    destFile.outputStream().use { output -> input.copyTo(output) }
-                }
-                proofPath = destFile.absolutePath
-                errorMessage = null
+                photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            } catch (e2: Exception) {
+                errorMessage = "Could not open file manager: ${e.localizedMessage}"
+            }
+        }
+    }
 
-                // Perform OCR & Vision Analysis on the selected transaction screenshot
-                isAnalyzingScreenshot = true
-                coroutineScope.launch {
-                    val result = TransactionScreenshotAnalyzer.analyzeScreenshot(
-                        context = context,
-                        imageUri = uri,
-                        currentlyEnteredAmount = amountInput.toDoubleOrNull(),
-                        selectedCurrency = selectedCurrency,
-                        checkDuplicateTxId = checkDuplicateTxId
-                    )
-                    isAnalyzingScreenshot = false
-                    analysisResult = result
+    // 3. Camera Capture
+    val takePictureLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success: Boolean ->
+        if (success) {
+            tempCameraUri?.let { handleSelectedImageUri(it) }
+        }
+    }
 
-                    // Automatically populate empty fields with extracted data
-                    if (result.extractedAmount != null && amountInput.isBlank()) {
-                        amountInput = if (result.extractedAmount % 1.0 == 0.0) {
-                            result.extractedAmount.toLong().toString()
-                        } else {
-                            result.extractedAmount.toString()
-                        }
-                    }
-
-                    if (result.extractedReferenceId != null && referenceInput.isBlank()) {
-                        referenceInput = result.extractedReferenceId
-                    }
-
-                    if (result.detectedCurrency != null && result.detectedCurrency != selectedCurrency) {
-                        // User can review or switch if desired
-                    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            try {
+                val photoFile = File(context.cacheDir, "camera_slip_${System.currentTimeMillis()}.jpg")
+                photoFile.parentFile?.mkdirs()
+                photoFile.createNewFile()
+                val photoUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
+                tempCameraUri = photoUri
+                try {
+                    takePictureLauncher.launch(photoUri)
+                } catch (e: Exception) {
+                    errorMessage = "Camera application not available on this device. Please select from Screenshots or Photo Library."
                 }
             } catch (e: Exception) {
-                errorMessage = "Failed to load image file from gallery."
-                isAnalyzingScreenshot = false
+                errorMessage = "Could not initialize camera storage: ${e.localizedMessage ?: "Camera error"}"
+            }
+        } else {
+            errorMessage = "Camera permission was denied. You can select an existing screenshot from your Screenshots folder instead."
+        }
+    }
+
+    fun launchCamera() {
+        val permission = android.Manifest.permission.CAMERA
+        if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
+            try {
+                val photoFile = File(context.cacheDir, "camera_slip_${System.currentTimeMillis()}.jpg")
+                photoFile.parentFile?.mkdirs()
+                photoFile.createNewFile()
+                val photoUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", photoFile)
+                tempCameraUri = photoUri
+                try {
+                    takePictureLauncher.launch(photoUri)
+                } catch (e: Exception) {
+                    errorMessage = "Camera application not available on this device. Please select from Screenshots or Photo Library."
+                }
+            } catch (e: Exception) {
+                errorMessage = "Could not initialize camera storage: ${e.localizedMessage ?: "Camera error"}"
+            }
+        } else {
+            try {
+                cameraPermissionLauncher.launch(permission)
+            } catch (e: Exception) {
+                errorMessage = "Could not request camera permission: ${e.localizedMessage}"
             }
         }
     }
@@ -609,6 +696,25 @@ fun SimpleAddMoneyDialog(
                                 Text("Review before submit", fontSize = 10.sp, color = Color(0xFF15803D))
                             }
                             Spacer(modifier = Modifier.height(6.dp))
+
+                            // Detected Bank / Institution
+                            if (analysis.detectedInstitution != null) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Detected Bank / Channel:", fontSize = 11.sp, color = Color(0xFF166534))
+                                    Text(
+                                        text = analysis.detectedInstitution,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF14532D)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                            }
+
                             if (analysis.extractedAmount != null) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -708,13 +814,23 @@ fun SimpleAddMoneyDialog(
                                 }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     IconButton(
+                                        onClick = { launchScreenshotsFolder() }
+                                    ) {
+                                        Icon(imageVector = Icons.Default.FolderOpen, contentDescription = "Screenshots Folder", tint = MutedBlueDark)
+                                    }
+                                    IconButton(
+                                        onClick = { launchCamera() }
+                                    ) {
+                                        Icon(imageVector = Icons.Default.PhotoCamera, contentDescription = "Take Photo", tint = MutedBlueDark)
+                                    }
+                                    IconButton(
                                         onClick = {
                                             photoPickerLauncher.launch(
                                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                             )
                                         }
                                     ) {
-                                        Icon(imageVector = Icons.Default.Refresh, contentDescription = "Change Screenshot", tint = MutedBlueDark)
+                                        Icon(imageVector = Icons.Default.PhotoLibrary, contentDescription = "Photo Library", tint = MutedBlueDark)
                                     }
                                     IconButton(onClick = {
                                         proofPath = ""
@@ -740,72 +856,110 @@ fun SimpleAddMoneyDialog(
                         }
                     }
                 } else {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = {
-                                photoPickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(50.dp)
-                                .testTag("pick_proof_btn"),
-                            shape = RoundedCornerShape(12.dp)
+                        // Row 1: Direct Screenshots Folder & Camera
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Upload Screenshot", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            OutlinedButton(
+                                onClick = { launchScreenshotsFolder() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("pick_screenshots_btn"),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Screenshots", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = { launchCamera() },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("open_camera_btn"),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Open Camera", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
 
-                        Button(
-                            onClick = {
-                                val amt = amountInput.toDoubleOrNull() ?: 5000.0
-                                val ref = if (referenceInput.isNotBlank()) referenceInput else "WIRE-${System.currentTimeMillis().toString().takeLast(6)}"
-                                if (referenceInput.isBlank()) referenceInput = ref
-
-                                val amtFormatted = if (selectedCurrency == AppCurrency.AED) {
-                                    "AED ${FormatUtils.formatInteger(amt)}"
-                                } else {
-                                    "${selectedCurrency.symbol}${FormatUtils.formatInteger(amt)}"
-                                }
-
-                                val bitmap = ProofReceiptGenerator.generateReceiptBitmap(
-                                    stage = com.example.data.model.TransactionStage.CAPITAL_INJECTION,
-                                    userEmail = currentUser.email,
-                                    amountText = amtFormatted,
-                                    referenceNo = ref,
-                                    notes = "Bank wire transfer to central pool (${selectedCurrency.code})"
-                                )
-                                val generatedPath = ProofReceiptGenerator.saveBitmapToFile(context, bitmap, "wire_slip")
-                                proofPath = generatedPath
-
-                                // Analyze generated receipt
-                                isAnalyzingScreenshot = true
-                                coroutineScope.launch {
-                                    val result = TransactionScreenshotAnalyzer.analyzeBitmap(
-                                        bitmap = bitmap,
-                                        currentlyEnteredAmount = amt,
-                                        selectedCurrency = selectedCurrency,
-                                        checkDuplicateTxId = checkDuplicateTxId
-                                    )
-                                    isAnalyzingScreenshot = false
-                                    analysisResult = result
-                                }
-                            },
-                            modifier = Modifier
-                                .weight(1.2f)
-                                .height(50.dp)
-                                .testTag("generate_proof_btn"),
-                            colors = ButtonDefaults.buttonColors(containerColor = MutedBluePrimary),
-                            shape = RoundedCornerShape(12.dp)
+                        // Row 2: Gallery & Generate Slip
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.Receipt, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Generate Slip", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            OutlinedButton(
+                                onClick = {
+                                    photoPickerLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("pick_proof_btn"),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Photo Library", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    val amt = amountInput.toDoubleOrNull() ?: 5000.0
+                                    val ref = if (referenceInput.isNotBlank()) referenceInput else "WIRE-${System.currentTimeMillis().toString().takeLast(6)}"
+                                    if (referenceInput.isBlank()) referenceInput = ref
+
+                                    val amtFormatted = if (selectedCurrency == AppCurrency.AED) {
+                                        "AED ${FormatUtils.formatInteger(amt)}"
+                                    } else {
+                                        "${selectedCurrency.symbol}${FormatUtils.formatInteger(amt)}"
+                                    }
+
+                                    val bitmap = ProofReceiptGenerator.generateReceiptBitmap(
+                                        stage = com.example.data.model.TransactionStage.CAPITAL_INJECTION,
+                                        userEmail = currentUser.email,
+                                        amountText = amtFormatted,
+                                        referenceNo = ref,
+                                        notes = "Bank wire transfer to central pool (${selectedCurrency.code})"
+                                    )
+                                    val generatedPath = ProofReceiptGenerator.saveBitmapToFile(context, bitmap, "wire_slip")
+                                    proofPath = generatedPath
+
+                                    // Analyze generated receipt
+                                    isAnalyzingScreenshot = true
+                                    coroutineScope.launch {
+                                        val result = TransactionScreenshotAnalyzer.analyzeBitmap(
+                                            bitmap = bitmap,
+                                            currentlyEnteredAmount = amt,
+                                            selectedCurrency = selectedCurrency,
+                                            checkDuplicateTxId = checkDuplicateTxId
+                                        )
+                                        isAnalyzingScreenshot = false
+                                        analysisResult = result
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1.1f)
+                                    .height(48.dp)
+                                    .testTag("generate_proof_btn"),
+                                colors = ButtonDefaults.buttonColors(containerColor = MutedBluePrimary),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Receipt, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Generate Slip", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
