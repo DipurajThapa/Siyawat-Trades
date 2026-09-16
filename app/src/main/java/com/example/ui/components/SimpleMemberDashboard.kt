@@ -101,8 +101,10 @@ import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.MonetizationOn
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.automirrored.filled.TrendingDown
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TableChart
@@ -110,8 +112,6 @@ import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.Token
-import androidx.compose.material.icons.filled.TrendingDown
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.WarningAmber
 import kotlin.math.abs
@@ -469,7 +469,7 @@ fun SimpleMemberDashboard(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = if (isProfit) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+                                    imageVector = if (isProfit) Icons.AutoMirrored.Filled.TrendingUp else Icons.AutoMirrored.Filled.TrendingDown,
                                     contentDescription = null,
                                     tint = profitColor,
                                     modifier = Modifier.size(20.dp)
@@ -716,7 +716,7 @@ fun SimpleMemberDashboard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ReceiptLong,
+                            imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                             contentDescription = null,
                             tint = TextMuted,
                             modifier = Modifier.size(11.dp)
@@ -781,7 +781,7 @@ fun SimpleMemberDashboard(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ReceiptLong,
+                            imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                             contentDescription = null,
                             tint = TextMuted,
                             modifier = Modifier.size(36.dp)
@@ -1125,7 +1125,7 @@ fun SimpleTransactionRow(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ReceiptLong,
+                        imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
                         tint = MutedBlueDark

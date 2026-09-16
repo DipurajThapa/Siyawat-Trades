@@ -150,7 +150,8 @@ object SecurityHardeningManager {
         for (tx in transactions) {
             // In a secured ledger, we verify that fundamental financial invariants hold:
             val isDataConsistent = (tx.amountFiat == null || tx.amountFiat >= 0) &&
-                    (tx.originalAmount == null || tx.originalAmount >= 0) &&
+                    (tx.amountUsdt == null || tx.amountUsdt >= 0) &&
+                    tx.originalAmount >= 0 &&
                     tx.convertedAmountUsd >= 0 &&
                     tx.referenceNo.isNotBlank() &&
                     tx.userEmail.isNotBlank()

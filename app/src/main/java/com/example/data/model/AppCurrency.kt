@@ -15,7 +15,7 @@ enum class AppCurrency(
 
         fun fromCode(code: String?): AppCurrency {
             if (code.isNullOrBlank()) return INR
-            return values().firstOrNull { it.code.equals(code, ignoreCase = true) } ?: INR
+            return entries.firstOrNull { it.code.equals(code, ignoreCase = true) } ?: INR
         }
     }
 }

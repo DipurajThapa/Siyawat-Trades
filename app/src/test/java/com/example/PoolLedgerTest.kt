@@ -610,5 +610,155 @@ class PoolLedgerTest {
         assertEquals("UTR-ALICE-101", docMap["referenceNo"])
         assertEquals(TransactionStatus.VERIFIED.name, docMap["status"])
     }
+
+    @Test
+    fun testMultiCurrencyConversionsAndDefaultCurrencies() {
+        // Verify default currencies order and symbols
+        assertEquals(AppCurrency.INR, AppCurrency.ALL[0])
+        assertEquals(AppCurrency.AED, AppCurrency.ALL[1])
+        assertEquals(AppCurrency.USD, AppCurrency.ALL[2])
+
+        assertEquals("₹", AppCurrency.INR.symbol)
+        assertEquals("AED", AppCurrency.AED.symbol)
+        assertEquals("$", AppCurrency.USD.symbol)
+
+        // Lookup from code
+        assertEquals(AppCurrency.INR, AppCurrency.fromCode("inr"))
+        assertEquals(AppCurrency.AED, AppCurrency.fromCode("AED"))
+        assertEquals(AppCurrency.USD, AppCurrency.fromCode("USD"))
+        assertEquals(AppCurrency.INR, AppCurrency.fromCode(null))
+        assertEquals(AppCurrency.INR, AppCurrency.fromCode("INVALID"))
+
+        // Conversion math: 83.50 INR = 1 USD; 3.6725 AED = 1 USD
+        val inrAmount = 83500.0
+        val usdFromInr = inrAmount / AppCurrency.INR.defaultRatePerUsd
+        assertEquals(1000.0, usdFromInr, 0.001)
+
+        val aedAmount = 3672.50
+        val usdFromAed = aedAmount / AppCurrency.AED.defaultRatePerUsd
+        assertEquals(1000.0, usdFromAed, 0.001)
+    }
+
+    @Test
+    fun testSettlementAndDisputeStateTransitions() = runBlocking {
+        val testEntity = PoolTransactionEntity(
+            stage = TransactionStage.CAPITAL_INJECTION,
+            userEmail = "trader@example.com",
+            userName = "Trader",
+            amountFiat = 1000.0,
+            referenceNo = "TX-SETTLE-001",
+            proofUri = "proof.png",
+            settlementState = SettlementState.UNSETTLED,
+            recordState = RecordState.APPROVED,
+            reconciliationState = ReconciliationState.UNRECONCILED
+        )
+        val txId = repository.insertTransaction(testEntity)
+
+        // 1. Record Settlement
+        val settleResult = repository.recordSettlement(
+            id = txId,
+            operatorUser = PoolUser("dipuraj.thapa@gmail.com", "Admin", UserRole.ADMIN),
+            bankUtr = "BANK-UTR-999"
+        )
+        assertTrue("Settlement should succeed", settleResult.isSuccess)
+
+        val settledTx = db.transactionDao().getTransactionById(txId)
+        assertNotNull(settledTx)
+        assertEquals(SettlementState.SETTLED, settledTx!!.settlementState)
+        assertEquals("BANK-UTR-999", settledTx.bankUtrNumber)
+
+        // 2. Raise Dispute
+        val disputeResult = repository.raiseDispute(
+            id = txId,
+            currentUser = PoolUser("trader@example.com", "Trader", UserRole.MEMBER),
+            reason = "Amount credited does not match transfer slip"
+        )
+        assertTrue("Dispute raising should succeed", disputeResult.isSuccess)
+
+        val disputedTx = db.transactionDao().getTransactionById(txId)
+        assertNotNull(disputedTx)
+        assertEquals(ReconciliationState.DISPUTED, disputedTx!!.reconciliationState)
+        assertEquals("Amount credited does not match transfer slip", disputedTx.disputeReason)
+
+        // 3. Resolve Dispute
+        val resolveResult = repository.resolveDispute(
+            id = txId,
+            adminUser = PoolUser("dipuraj.thapa@gmail.com", "Admin", UserRole.ADMIN),
+            resolutionNotes = "Verified banking ledger. Transfer was correct.",
+            isConfirmed = true
+        )
+        assertTrue("Dispute resolution should succeed", resolveResult.isSuccess)
+
+        val resolvedTx = db.transactionDao().getTransactionById(txId)
+        assertNotNull(resolvedTx)
+        assertEquals(ReconciliationState.RECONCILED, resolvedTx!!.reconciliationState)
+    }
+
+    @Test
+    fun testFifoAccountingWithMultipleLots() {
+        val transactions = listOf(
+            // Lot 1: Buy 1000 USDT at $1.00 each = $1000
+            PoolTransactionEntity(
+                id = 1L,
+                stage = TransactionStage.USDT_ACQUISITION,
+                amountFiat = 1000.0,
+                fiatCurrency = "USD",
+                amountUsdt = 1000.0,
+                exchangeRate = 1.00,
+                fee = 0.0,
+                status = TransactionStatus.VERIFIED,
+                timestamp = 1000L,
+                userEmail = "admin@example.com",
+                userName = "Admin",
+                referenceNo = "LOT-1",
+                proofUri = "",
+                convertedAmountUsd = 1000.0
+            ),
+            // Lot 2: Buy 2000 USDT at $1.02 each = $2040
+            PoolTransactionEntity(
+                id = 2L,
+                stage = TransactionStage.USDT_ACQUISITION,
+                amountFiat = 2040.0,
+                fiatCurrency = "USD",
+                amountUsdt = 2000.0,
+                exchangeRate = 1.02,
+                fee = 0.0,
+                status = TransactionStatus.VERIFIED,
+                timestamp = 2000L,
+                userEmail = "admin@example.com",
+                userName = "Admin",
+                referenceNo = "LOT-2",
+                proofUri = "",
+                convertedAmountUsd = 2040.0
+            ),
+            // Liquidation 1: Sell 1500 USDT at $1.05 each
+            // FIFO: takes 1000 from Lot 1 (cost $1000) and 500 from Lot 2 (cost 500 * 1.02 = $510)
+            // Total cost = $1510. Proceeds = 1500 * 1.05 = $1575. Realized Gain = $65.
+            PoolTransactionEntity(
+                id = 3L,
+                stage = TransactionStage.LIQUIDATION,
+                amountFiat = 1575.0,
+                fiatCurrency = "USD",
+                amountUsdt = 1500.0,
+                exchangeRate = 1.05,
+                fee = 0.0,
+                status = TransactionStatus.VERIFIED,
+                timestamp = 3000L,
+                userEmail = "admin@example.com",
+                userName = "Admin",
+                referenceNo = "SELL-1",
+                proofUri = "",
+                convertedAmountUsd = 1575.0
+            )
+        )
+
+        val fifo = repository.calculateFifoLedger(transactions)
+        assertEquals(3000.0, fifo.totalUsdtPurchased, 0.001)
+        assertEquals(1500.0, fifo.totalUsdtSold, 0.001)
+        assertEquals(1500.0, fifo.remainingUsdtInventory, 0.001)
+        assertEquals(1575.0, fifo.totalSaleProceedsFiat, 0.001)
+        assertEquals(1510.0, fifo.totalCostBasisOfSoldUsdt, 0.001)
+        assertEquals(65.0, fifo.totalRealizedGainLossFiat, 0.001)
+    }
 }
 

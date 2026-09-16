@@ -151,6 +151,7 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
         @Suppress("UNCHECKED_CAST")
         val rawTransactions = args[0] as List<PoolTransactionEntity>
         val currentUser = args[1] as PoolUser
+        @Suppress("UNCHECKED_CAST")
         val whitelist = args[2] as List<PoolUser>
         val timePeriodFilter = args[3] as TimePeriodFilter
         val selectedTab = args[4] as AppTab
@@ -638,7 +639,9 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
             _isAccessDenied.value = true
             _currentUser.value = PoolUser(
                 email = trimmed,
-                name = trimmed.substringBefore("@").replace(".", " ").capitalize(),
+                name = trimmed.substringBefore("@").replace(".", " ").replaceFirstChar {
+                    if (it.isLowerCase()) it.titlecase() else it.toString()
+                },
                 role = UserRole.MEMBER,
                 isWhitelisted = false,
                 avatarColorHex = 0xFFEF4444

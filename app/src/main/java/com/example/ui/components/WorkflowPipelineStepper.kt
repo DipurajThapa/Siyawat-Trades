@@ -18,7 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -112,7 +112,7 @@ fun WorkflowPipelineStepper(
                 )
             }
 
-            TransactionStage.values().forEachIndexed { index, stage ->
+            TransactionStage.entries.forEachIndexed { index, stage ->
                 val isSelected = selectedStage == stage
                 val count = stageCounts[stage] ?: 0
 
@@ -176,10 +176,10 @@ fun WorkflowPipelineStepper(
                         }
                     }
 
-                    if (index < TransactionStage.values().lastIndex) {
+                    if (index < TransactionStage.entries.lastIndex) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Icon(
-                            imageVector = Icons.Default.ArrowForward,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = "next",
                             tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
                             modifier = Modifier.size(12.dp)

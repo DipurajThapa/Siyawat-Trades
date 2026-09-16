@@ -118,7 +118,7 @@ fun NewTransactionDialog(
 
     // Permitted stages based on role
     val availableStages = if (currentUser.isAdmin) {
-        TransactionStage.values().toList()
+        TransactionStage.entries.toList()
     } else {
         listOf(TransactionStage.CAPITAL_INJECTION, TransactionStage.LIQUIDATION)
     }

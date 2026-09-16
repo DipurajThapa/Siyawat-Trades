@@ -159,7 +159,7 @@ fun MainScreen(
                             containerColor = MaterialTheme.colorScheme.surface,
                             contentColor = MutedBluePrimary,
                             indicator = { tabPositions ->
-                                TabRowDefaults.Indicator(
+                                TabRowDefaults.SecondaryIndicator(
                                     modifier = Modifier.tabIndicatorOffset(
                                         tabPositions[if (uiState.selectedTab == AppTab.DASHBOARD) 0 else 1]
                                     ),

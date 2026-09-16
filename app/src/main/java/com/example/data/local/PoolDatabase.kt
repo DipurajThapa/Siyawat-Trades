@@ -25,7 +25,7 @@ abstract class PoolDatabase : RoomDatabase() {
                     context.applicationContext,
                     PoolDatabase::class.java,
                     "usdt_pool_ledger.db"
-                ).fallbackToDestructiveMigration().build()
+                ).fallbackToDestructiveMigration(dropAllTables = true).build()
                 INSTANCE = instance
                 instance
             }

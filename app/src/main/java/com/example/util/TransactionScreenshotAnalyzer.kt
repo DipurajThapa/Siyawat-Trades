@@ -51,23 +51,8 @@ object TransactionScreenshotAnalyzer {
     ): ScreenshotAnalysisResult = withContext(Dispatchers.Default) {
         try {
             val inputImage = withContext(Dispatchers.IO) {
-                val bitmap = try {
-                    if (imageUri.scheme == "file" || (imageUri.path != null && java.io.File(imageUri.path!!).exists())) {
-                        BitmapFactory.decodeFile(imageUri.path)
-                    } else {
-                        context.contentResolver.openInputStream(imageUri)?.use { stream ->
-                            BitmapFactory.decodeStream(stream)
-                        }
-                    }
-                } catch (e: Exception) {
-                    null
-                } ?: try {
-                    context.contentResolver.openInputStream(imageUri)?.use { stream ->
-                        BitmapFactory.decodeStream(stream)
-                    }
-                } catch (e: Exception) {
-                    null
-                } ?: throw IllegalArgumentException("Could not decode image from uri: $imageUri")
+                val bitmap = decodeSampledBitmap(context, imageUri, maxDimension = 1920)
+                    ?: throw IllegalArgumentException("Could not decode image from uri: $imageUri")
                 InputImage.fromBitmap(bitmap, 0)
             }
             val visionText = recognizer.process(inputImage).await()
@@ -454,5 +439,46 @@ object TransactionScreenshotAnalyzer {
             }
         }
         return null
+    }
+
+    private fun decodeSampledBitmap(context: Context, uri: Uri, maxDimension: Int): Bitmap? {
+        return try {
+            // First check dimensions
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            if (uri.scheme == "file" || (uri.path != null && java.io.File(uri.path!!).exists())) {
+                BitmapFactory.decodeFile(uri.path, options)
+            } else {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, options)
+                }
+            }
+
+            // Calculate inSampleSize
+            var inSampleSize = 1
+            if (options.outHeight > maxDimension || options.outWidth > maxDimension) {
+                val halfHeight = options.outHeight / 2
+                val halfWidth = options.outWidth / 2
+                while (halfHeight / inSampleSize >= maxDimension && halfWidth / inSampleSize >= maxDimension) {
+                    inSampleSize *= 2
+                }
+            }
+
+            // Decode bitmap with inSampleSize
+            val decodeOptions = BitmapFactory.Options().apply {
+                this.inSampleSize = inSampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            if (uri.scheme == "file" || (uri.path != null && java.io.File(uri.path!!).exists())) {
+                BitmapFactory.decodeFile(uri.path, decodeOptions)
+            } else {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, decodeOptions)
+                }
+            }
+        } catch (e: Throwable) {
+            null
+        }
     }
 }

@@ -215,7 +215,7 @@ fun GoogleDriveStorageDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TransactionStage.values().forEach { stage ->
+                    TransactionStage.entries.forEach { stage ->
                         val countForStage = transactions.count { it.stage == stage && it.proofUri.isNotBlank() }
 
                         Row(

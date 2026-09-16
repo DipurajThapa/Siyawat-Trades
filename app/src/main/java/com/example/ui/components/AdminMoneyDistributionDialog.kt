@@ -35,7 +35,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Token
 import androidx.compose.material.icons.filled.Warning
@@ -52,6 +52,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -327,7 +328,7 @@ fun AdminMoneyDistributionDialog(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Send,
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
                                     contentDescription = null,
                                     tint = MutedBlueDark,
                                     modifier = Modifier.size(20.dp)
@@ -407,7 +408,7 @@ fun AdminMoneyDistributionDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        DistributionAssetType.values().forEach { asset ->
+                        DistributionAssetType.entries.forEach { asset ->
                             val isSelected = selectedAssetType == asset
                             Surface(
                                 onClick = {
@@ -611,7 +612,7 @@ fun AdminMoneyDistributionDialog(
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = userDropdownExpanded) },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .menuAnchor()
+                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
                                     .testTag("dropdown_beneficiary_user"),
                                 shape = RoundedCornerShape(12.dp)
                             )

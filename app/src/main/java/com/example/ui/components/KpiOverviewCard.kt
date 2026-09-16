@@ -14,11 +14,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.CurrencyExchange
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Savings
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -205,7 +205,7 @@ fun KpiOverviewCard(
                     title = "Total Fiat Realised",
                     value = "$${formatNumber(metrics.totalFiatRealised)}",
                     subtitle = "PnL: ${if (metrics.netRealizedProfitLossFiat >= 0) "+$" else "-$"}${formatNumber(kotlin.math.abs(metrics.netRealizedProfitLossFiat))}",
-                    icon = Icons.Default.TrendingUp,
+                    icon = Icons.AutoMirrored.Filled.TrendingUp,
                     accentColor = if (metrics.netRealizedProfitLossFiat >= 0) ProfitGreen else Color(0xFFEF4444)
                 )
             }

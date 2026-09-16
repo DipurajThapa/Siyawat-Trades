@@ -232,7 +232,7 @@ fun TimePeriodSelector(
                         .background(MaterialTheme.colorScheme.surface)
                         .testTag("time_period_menu")
                 ) {
-                    TimePeriodType.values().forEach { type ->
+                    TimePeriodType.entries.forEach { type ->
                         val isSelected = selectedFilter.type == type
                         DropdownMenuItem(
                             text = {
