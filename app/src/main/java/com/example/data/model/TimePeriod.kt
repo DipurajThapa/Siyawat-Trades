@@ -244,7 +244,7 @@ data class PeriodSummary(
     val usdtRemaining: Long = 0L,      // Zero decimal USDT left in pool (always USDT)
     val totalTransactionsCount: Int = 0,
     val profitLoss: Long = 0L,         // Zero decimal net realized profit/loss in display currency
-    val currency: AppCurrency = AppCurrency.USD // Active display currency
+    val currency: AppCurrency = AppCurrency.INR // Active display currency
 ) {
     val isProfit: Boolean get() = profitLoss >= 0
 }

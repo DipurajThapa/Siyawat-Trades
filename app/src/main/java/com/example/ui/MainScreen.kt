@@ -73,6 +73,7 @@ import com.example.data.model.TransactionStatus
 import com.example.ui.components.AccessDeniedScreen
 import com.example.ui.components.AdminMoneyDistributionDialog
 import com.example.ui.components.AdminOperationsPanel
+import com.example.ui.components.AssignRoleAndResponsibilitiesDialog
 import com.example.ui.components.ExchangeRateDialog
 import com.example.ui.components.GoogleDriveStorageDialog
 import com.example.ui.components.NewTransactionDialog
@@ -369,6 +370,10 @@ fun MainScreen(
                         },
                         onRecordSettlement = { tx ->
                             viewModel.openSettleDialog(tx)
+                        },
+                        whitelistedUsers = uiState.whitelistedUsers,
+                        onAssignRolesAndResponsibilities = { user ->
+                            viewModel.openRoleAssignmentDialog(user)
                         }
                     )
                 } else {
@@ -472,7 +477,10 @@ fun MainScreen(
             onSelectUser = { viewModel.switchUser(it) },
             onSimulateCustomLogin = { viewModel.simulateCustomEmailLogin(it) },
             onAddWhitelistedMember = { email, name -> viewModel.addWhitelistedMember(email, name) },
-            onResetDemoData = { viewModel.resetDemoData() }
+            onResetDemoData = { viewModel.resetDemoData() },
+            onAssignRolesAndResponsibilities = { user ->
+                viewModel.openRoleAssignmentDialog(user)
+            }
         )
     }
 
@@ -581,6 +589,23 @@ fun MainScreen(
         FifoLotAuditDialog(
             fifoResult = viewModel.getFifoLedgerResult(),
             onDismiss = { viewModel.closeFifoLotAudit() }
+        )
+    }
+
+    // 13. Assign Roles & Responsibilities Dialog (Admin control)
+    if (uiState.selectedUserForRoleAssignment != null) {
+        val targetUser = uiState.selectedUserForRoleAssignment!!
+        AssignRoleAndResponsibilitiesDialog(
+            user = targetUser,
+            onDismiss = { viewModel.closeRoleAssignmentDialog() },
+            onSave = { newRole, responsibilities, designation ->
+                viewModel.updateUserRoleAndResponsibilities(
+                    email = targetUser.email,
+                    newRole = newRole,
+                    responsibilities = responsibilities,
+                    customDesignation = designation
+                )
+            }
         )
     }
 }

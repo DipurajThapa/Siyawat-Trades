@@ -117,6 +117,7 @@ import androidx.compose.material.icons.filled.WarningAmber
 import kotlin.math.abs
 import com.example.util.FormatUtils
 import java.text.SimpleDateFormat
+import androidx.compose.ui.text.style.TextOverflow
 import java.util.Date
 import java.util.Locale
 
@@ -127,8 +128,8 @@ fun SimpleMemberDashboard(
     selectedFilter: com.example.data.model.TimePeriodFilter = periodSummary.filter,
     transactions: List<PoolTransactionEntity>,
     currentUser: PoolUser,
-    activeCurrency: com.example.data.model.AppCurrency = com.example.data.model.AppCurrency.USD,
-    activeRate: Double = 1.0,
+    activeCurrency: com.example.data.model.AppCurrency = com.example.data.model.AppCurrency.INR,
+    activeRate: Double = 83.50,
     onSelectCurrency: (com.example.data.model.AppCurrency) -> Unit = {},
     onOpenRateDialog: () -> Unit = {},
     onSelectPeriod: (TimePeriod) -> Unit = {},
@@ -142,11 +143,20 @@ fun SimpleMemberDashboard(
     val context = LocalContext.current
     var showApprovedOnly by remember { mutableStateOf(false) }
 
-    val displayedTransactions = remember(transactions, showApprovedOnly) {
-        if (showApprovedOnly) {
-            transactions.filter { it.approvalStatus == "APPROVED" || it.status == TransactionStatus.VERIFIED || it.status == TransactionStatus.COMPLETED }
-        } else {
+    // Defense-in-depth: Ensure non-manager members can only see their own transactions
+    val displayedTransactions = remember(transactions, showApprovedOnly, currentUser) {
+        val base = if (currentUser.canManage) {
             transactions
+        } else {
+            transactions.filter { tx ->
+                tx.userEmail.equals(currentUser.email, ignoreCase = true) ||
+                (tx.recipientEmail != null && tx.recipientEmail.equals(currentUser.email, ignoreCase = true))
+            }
+        }
+        if (showApprovedOnly) {
+            base.filter { it.approvalStatus == "APPROVED" || it.status == TransactionStatus.VERIFIED || it.status == TransactionStatus.COMPLETED }
+        } else {
+            base
         }
     }
 
@@ -155,7 +165,7 @@ fun SimpleMemberDashboard(
             .fillMaxSize()
             .background(PaperBackground)
             .testTag("simple_member_dashboard"),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 48.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 100.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Multi-Currency Selection Bar
@@ -332,7 +342,7 @@ fun SimpleMemberDashboard(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
-                            text = "Money Spent",
+                            text = if (currentUser.canManage) "Total Collected" else "My Contributed Capital",
                             fontFamily = Montserrat,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -400,7 +410,7 @@ fun SimpleMemberDashboard(
                         Spacer(modifier = Modifier.height(10.dp))
 
                         Text(
-                            text = "Earned Back",
+                            text = if (currentUser.canManage) "Total Distributed" else "My Received Returns",
                             fontFamily = Montserrat,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -467,7 +477,7 @@ fun SimpleMemberDashboard(
                             }
                             Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "PROFIT & LOSS",
+                                text = if (currentUser.canManage) "POOL PROFIT & LOSS" else "MY NET RETURN",
                                 fontFamily = Montserrat,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -520,89 +530,91 @@ fun SimpleMemberDashboard(
             }
         }
 
-        // Hierarchy Step 3: Remaining USDT (Placed directly below Profit & Loss)
-        item {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("metric_card_usdt_left"),
-                colors = CardDefaults.cardColors(containerColor = PaperCard),
-                border = BorderStroke(1.dp, PaperBorder),
-                shape = RoundedCornerShape(16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
-            ) {
-                Column(
+        // Hierarchy Step 3: Remaining USDT (Restricted to Admin, Super Admin, and Sub-admin only)
+        if (currentUser.canManage) {
+            item {
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(18.dp)
+                        .testTag("metric_card_usdt_left"),
+                    colors = CardDefaults.cardColors(containerColor = PaperCard),
+                    border = BorderStroke(1.dp, PaperBorder),
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(CircleShape)
-                                    .background(MutedBlueContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AccountBalanceWallet,
-                                    contentDescription = null,
-                                    tint = MutedBlueDark,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "Remaining USDT",
-                                fontFamily = Montserrat,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
-                            )
-                        }
-
                         Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MutedBlueContainer)
-                                .border(1.dp, MutedBlueBorder, RoundedCornerShape(6.dp))
-                                .padding(horizontal = 8.dp, vertical = 3.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Token,
-                                contentDescription = null,
-                                tint = MutedBlueDark,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Active Pool",
-                                fontFamily = Montserrat,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MutedBlueDark
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(MutedBlueContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AccountBalanceWallet,
+                                        contentDescription = null,
+                                        tint = MutedBlueDark,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "Remaining USDT",
+                                    fontFamily = Montserrat,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextPrimary
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MutedBlueContainer)
+                                    .border(1.dp, MutedBlueBorder, RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Token,
+                                    contentDescription = null,
+                                    tint = MutedBlueDark,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Active Pool",
+                                    fontFamily = Montserrat,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MutedBlueDark
+                                )
+                            }
                         }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Large Roboto Condensed, Non-Bold Number
+                        Text(
+                            text = "${FormatUtils.formatInteger(periodSummary.usdtRemaining)} USDT",
+                            fontFamily = RobotoCondensed,
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.Normal,
+                            color = MutedBlueDark,
+                            letterSpacing = (-0.5).sp,
+                            modifier = Modifier.testTag("value_usdt_left")
+                        )
                     }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Large Roboto Condensed, Non-Bold Number
-                    Text(
-                        text = "${FormatUtils.formatInteger(periodSummary.usdtRemaining)} USDT",
-                        fontFamily = RobotoCondensed,
-                        fontSize = 34.sp,
-                        fontWeight = FontWeight.Normal,
-                        color = MutedBlueDark,
-                        letterSpacing = (-0.5).sp,
-                        modifier = Modifier.testTag("value_usdt_left")
-                    )
                 }
             }
         }
@@ -813,8 +825,8 @@ fun SimpleMemberDashboard(
 fun SimpleTransactionRow(
     tx: PoolTransactionEntity,
     currentUser: PoolUser? = null,
-    activeCurrency: com.example.data.model.AppCurrency = com.example.data.model.AppCurrency.USD,
-    activeRate: Double = 1.0,
+    activeCurrency: com.example.data.model.AppCurrency = com.example.data.model.AppCurrency.INR,
+    activeRate: Double = 83.50,
     onViewProof: () -> Unit,
     onConfirmReceipt: () -> Unit = {},
     onDispute: () -> Unit = {}
@@ -900,7 +912,9 @@ fun SimpleTransactionRow(
                         fontFamily = Montserrat,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     if (tx.driveFileId != null || tx.driveWebViewLink != null) {
                         Spacer(modifier = Modifier.width(6.dp))
@@ -974,7 +988,10 @@ fun SimpleTransactionRow(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
                     Icon(
                         imageVector = Icons.Default.CalendarToday,
                         contentDescription = "Date",
@@ -990,7 +1007,7 @@ fun SimpleTransactionRow(
                         color = TextPrimary
                     )
 
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
 
                     Icon(
                         imageVector = Icons.Default.Schedule,
@@ -1008,7 +1025,12 @@ fun SimpleTransactionRow(
                     )
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
                     Icon(
                         imageVector = Icons.Default.Tag,
                         contentDescription = "Reference",
@@ -1020,7 +1042,9 @@ fun SimpleTransactionRow(
                         text = tx.referenceNo,
                         fontFamily = Montserrat,
                         fontSize = 11.sp,
-                        color = TextMuted
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1036,6 +1060,7 @@ fun SimpleTransactionRow(
                 if (isApproved) {
                     Row(
                         modifier = Modifier
+                            .weight(1f, fill = false)
                             .clip(RoundedCornerShape(6.dp))
                             .background(RestrainedBlueContainer)
                             .border(1.dp, RestrainedBlueBorder, RoundedCornerShape(6.dp))
@@ -1054,12 +1079,15 @@ fun SimpleTransactionRow(
                             fontFamily = Montserrat,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = RestrainedBlue
+                            color = RestrainedBlue,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 } else {
                     Row(
                         modifier = Modifier
+                            .weight(1f, fill = false)
                             .clip(RoundedCornerShape(6.dp))
                             .background(AmberContainer)
                             .border(1.dp, AmberBorder, RoundedCornerShape(6.dp))
@@ -1078,10 +1106,14 @@ fun SimpleTransactionRow(
                             fontFamily = Montserrat,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = AmberTertiary
+                            color = AmberTertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Row(
                     modifier = Modifier

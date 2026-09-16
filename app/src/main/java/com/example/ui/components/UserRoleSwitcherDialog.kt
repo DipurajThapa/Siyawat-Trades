@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -59,6 +61,9 @@ import com.example.data.model.UserRole
 import com.example.ui.theme.MutedBlueDark
 import com.example.ui.theme.MutedBlueLight
 import com.example.ui.theme.MutedBluePrimary
+import com.example.ui.theme.ProfitGreenDark
+import com.example.ui.theme.ProfitGreenContainer
+import com.example.ui.theme.ProfitGreenBorder
 import com.example.ui.theme.RedCritical
 
 @Composable
@@ -69,12 +74,26 @@ fun UserRoleSwitcherDialog(
     onSelectUser: (PoolUser) -> Unit,
     onSimulateCustomLogin: (String) -> Unit,
     onAddWhitelistedMember: (String, String) -> Unit,
-    onResetDemoData: () -> Unit
+    onResetDemoData: () -> Unit,
+    onAssignRolesAndResponsibilities: ((PoolUser) -> Unit)? = null
 ) {
     var customEmailInput by remember { mutableStateOf("") }
     var newMemberEmail by remember { mutableStateOf("") }
     var newMemberName by remember { mutableStateOf("") }
     var showAddSection by remember { mutableStateOf(false) }
+    var pendingAdminUser by remember { mutableStateOf<PoolUser?>(null) }
+
+    if (pendingAdminUser != null) {
+        AdminPinChallengeDialog(
+            targetAdminName = pendingAdminUser!!.name,
+            onDismiss = { pendingAdminUser = null },
+            onSuccess = {
+                val target = pendingAdminUser!!
+                pendingAdminUser = null
+                onSelectUser(target)
+            }
+        )
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -165,7 +184,13 @@ fun UserRoleSwitcherDialog(
                                     color = if (isCurrent) MutedBluePrimary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
                                     shape = RoundedCornerShape(12.dp)
                                 )
-                                .clickable { onSelectUser(user) }
+                                .clickable {
+                                    if (user.isAdmin && !isCurrent) {
+                                        pendingAdminUser = user
+                                    } else {
+                                        onSelectUser(user)
+                                    }
+                                }
                                 .padding(12.dp)
                                 .testTag("select_user_${user.email}"),
                             verticalAlignment = Alignment.CenterVertically,
@@ -198,6 +223,14 @@ fun UserRoleSwitcherDialog(
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    if (user.customDesignation.isNotBlank()) {
+                                        Text(
+                                            text = user.customDesignation,
+                                            fontSize = 10.sp,
+                                            color = MutedBlueDark,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
                                 }
                             }
 
@@ -206,8 +239,7 @@ fun UserRoleSwitcherDialog(
                                     UserRole.SUPER_ADMIN -> Color(0xFF6366F1)
                                     UserRole.ADMIN -> MutedBluePrimary
                                     UserRole.SUB_ADMIN -> MutedBlueLight
-                                    UserRole.MEMBER -> Color(0xFF94A3B8)
-                                    else -> Color(0xFF94A3B8)
+                                    UserRole.MEMBER -> Color(0xFF64748B)
                                 }
                                 Box(
                                     modifier = Modifier
@@ -217,13 +249,7 @@ fun UserRoleSwitcherDialog(
                                         .testTag("user_role_chip_${user.email}")
                                 ) {
                                     Text(
-                                        text = when (user.role) {
-                                            UserRole.SUPER_ADMIN -> "SUPER-ADMIN"
-                                            UserRole.ADMIN -> "ADMIN"
-                                            UserRole.SUB_ADMIN -> "SUB-ADMIN"
-                                            UserRole.MEMBER -> "MEMBER"
-                                            else -> "MEMBER"
-                                        },
+                                        text = if (user.isDefaultUser) "USER (DEFAULT)" else user.role.label.uppercase(),
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = roleColor
@@ -231,13 +257,30 @@ fun UserRoleSwitcherDialog(
                                 }
 
                                 if (isCurrent) {
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Icon(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = "Active",
                                         tint = MutedBluePrimary,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
+                                }
+
+                                if ((currentUser.isAdmin || currentUser.canManageMembers) && onAssignRolesAndResponsibilities != null) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    IconButton(
+                                        onClick = { onAssignRolesAndResponsibilities(user) },
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .testTag("assign_role_switcher_btn_${user.email}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Tune,
+                                            contentDescription = "Assign Roles & Duties",
+                                            tint = MutedBluePrimary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -317,6 +360,29 @@ fun UserRoleSwitcherDialog(
                                     text = "Add Member to Approved Whitelist",
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
                                 )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(ProfitGreenContainer)
+                                            .border(1.dp, ProfitGreenBorder, RoundedCornerShape(4.dp))
+                                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "Default Assigned Role: User",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = ProfitGreenDark
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Admins can assign duties anytime",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 Spacer(modifier = Modifier.height(6.dp))
                                 OutlinedTextField(
                                     value = newMemberEmail,

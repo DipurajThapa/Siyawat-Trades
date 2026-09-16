@@ -33,8 +33,8 @@ data class PoolMetrics(
     val netRealizedProfitLossFiat: Double = 0.0,// Realized Fiat - Fiat equivalent of sold volume
 
     // Multi-currency display metadata
-    val currency: AppCurrency = AppCurrency.USD,
-    val exchangeRateUsed: Double = 1.0
+    val currency: AppCurrency = AppCurrency.INR,
+    val exchangeRateUsed: Double = 83.50
 ) {
     /**
      * Converts fiat metrics to the user's active display currency using the current exchange rate.

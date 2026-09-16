@@ -21,7 +21,7 @@ object GoogleSheetExporter {
 
     fun generateCsv(
         transactions: List<PoolTransactionEntity>,
-        activeCurrency: AppCurrency = AppCurrency.USD,
+        activeCurrency: AppCurrency = AppCurrency.INR,
         activeRatePerUsd: Double = activeCurrency.defaultRatePerUsd
     ): String {
         val sb = java.lang.StringBuilder()
@@ -69,24 +69,42 @@ object GoogleSheetExporter {
         transactions: List<PoolTransactionEntity>,
         timePeriod: TimePeriod = summary.period,
         summary: PeriodSummary,
-        activeRatePerUsd: Double = summary.currency.defaultRatePerUsd
+        activeRatePerUsd: Double = summary.currency.defaultRatePerUsd,
+        currentUser: com.example.data.model.PoolUser? = null
     ): File {
         val cleanPeriodTag = summary.periodLabel.replace(Regex("[^a-zA-Z0-9]"), "_")
-        val fileName = "Siyawat_Trades_Ledger_${summary.currency.code}_${cleanPeriodTag}_${fileDateFormat.format(Date())}.csv"
+        val isManager = currentUser?.canManage ?: true
+        val prefix = if (isManager) "Siyawat_Trades_Consolidated_Ledger" else "Siyawat_Trades_Member_Statement"
+        val fileName = "${prefix}_${summary.currency.code}_${cleanPeriodTag}_${fileDateFormat.format(Date())}.csv"
         val exportFile = File(context.cacheDir, fileName)
 
         FileWriter(exportFile).use { writer ->
             // Header & Period Summary block (easy to read in Google Sheets)
-            writer.appendLine("SIYAWAT TRADES - MULTI-CURRENCY TRANSPARENCY LEDGER")
-            writer.appendLine("Active Display Currency,${summary.currency.label}")
-            writer.appendLine("Exchange Rate Applied,1 USD = $activeRatePerUsd ${summary.currency.code}")
-            writer.appendLine("Selected Time Period,${summary.periodLabel}")
-            writer.appendLine("Date Range Boundaries,${summary.dateRangeText}")
-            writer.appendLine("Report Generated At,${dateFormat.format(Date())}")
-            writer.appendLine("Money Spent / Added,${FormatUtils.formatCurrencyZeroDecimal(summary.moneySpent.toDouble(), summary.currency)}")
-            writer.appendLine("Money Earned Back,${FormatUtils.formatCurrencyZeroDecimal(summary.moneyEarnedBack.toDouble(), summary.currency)}")
-            writer.appendLine("Net Profit / Loss,${FormatUtils.formatSignedCurrencyZeroDecimal(summary.profitLoss.toDouble(), summary.currency)}")
-            writer.appendLine("USDT Left in Pool,${summary.usdtRemaining} USDT")
+            if (isManager) {
+                writer.appendLine("SIYAWAT TRADES - MULTI-CURRENCY TREASURY LEDGER")
+                writer.appendLine("Administrative Access,Consolidated View (Admin / Sub-Admin)")
+                writer.appendLine("Active Display Currency,${summary.currency.label}")
+                writer.appendLine("Exchange Rate Applied,1 USD = $activeRatePerUsd ${summary.currency.code}")
+                writer.appendLine("Selected Time Period,${summary.periodLabel}")
+                writer.appendLine("Date Range Boundaries,${summary.dateRangeText}")
+                writer.appendLine("Report Generated At,${dateFormat.format(Date())}")
+                writer.appendLine("Total Capital Injected,${FormatUtils.formatCurrencyZeroDecimal(summary.moneySpent.toDouble(), summary.currency)}")
+                writer.appendLine("Total Distributed / Liquidated,${FormatUtils.formatCurrencyZeroDecimal(summary.moneyEarnedBack.toDouble(), summary.currency)}")
+                writer.appendLine("Pool Net Profit / Loss,${FormatUtils.formatSignedCurrencyZeroDecimal(summary.profitLoss.toDouble(), summary.currency)}")
+                writer.appendLine("USDT Left in Pool,${summary.usdtRemaining} USDT")
+            } else {
+                writer.appendLine("SIYAWAT TRADES - MEMBER ACCOUNT STATEMENT")
+                writer.appendLine("Member Name,${currentUser?.displayName ?: "Member"}")
+                writer.appendLine("Member Email,${currentUser?.email ?: ""}")
+                writer.appendLine("Active Display Currency,${summary.currency.label}")
+                writer.appendLine("Exchange Rate Applied,1 USD = $activeRatePerUsd ${summary.currency.code}")
+                writer.appendLine("Selected Time Period,${summary.periodLabel}")
+                writer.appendLine("Date Range Boundaries,${summary.dateRangeText}")
+                writer.appendLine("Report Generated At,${dateFormat.format(Date())}")
+                writer.appendLine("My Contributed Capital,${FormatUtils.formatCurrencyZeroDecimal(summary.moneySpent.toDouble(), summary.currency)}")
+                writer.appendLine("My Received Returns,${FormatUtils.formatCurrencyZeroDecimal(summary.moneyEarnedBack.toDouble(), summary.currency)}")
+                writer.appendLine("My Net Return,${FormatUtils.formatSignedCurrencyZeroDecimal(summary.profitLoss.toDouble(), summary.currency)}")
+            }
             writer.appendLine("") // Blank separator line
 
             // Column Headers

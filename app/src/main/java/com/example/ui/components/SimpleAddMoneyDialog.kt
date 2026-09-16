@@ -16,11 +16,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,6 +54,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -100,11 +105,11 @@ import java.util.Locale
 @Composable
 fun SimpleAddMoneyDialog(
     currentUser: PoolUser,
-    activeCurrency: AppCurrency = AppCurrency.USD,
+    activeCurrency: AppCurrency = AppCurrency.INR,
     exchangeRates: Map<AppCurrency, Double> = mapOf(
-        AppCurrency.USD to 1.0,
         AppCurrency.INR to 83.50,
-        AppCurrency.AED to 3.6725
+        AppCurrency.AED to 3.6725,
+        AppCurrency.USD to 1.0
     ),
     onDismiss: () -> Unit,
     onSubmit: (amountFiat: Double, referenceNo: String, proofUri: String, notes: String, currency: AppCurrency, exchangeRate: Double) -> Unit,
@@ -263,61 +268,80 @@ fun SimpleAddMoneyDialog(
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
-        Surface(
+        Box(
             modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .clip(RoundedCornerShape(24.dp))
-                .testTag("simple_add_money_dialog"),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp
+                .fillMaxSize()
+                .imePadding()
+                .systemBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 20.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Column(
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(22.dp)
+                    .widthIn(max = 520.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .testTag("simple_add_money_dialog"),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp
             ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column {
+                    // Pinned Header (Always visible)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 22.dp, end = 14.dp, top = 18.dp, bottom = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Add Money / Transfer",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Record money sent to the pool bank account",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.testTag("close_add_money_dialog_btn")
+                        ) {
+                            Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+
+                    // Scrollable Form Body
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 22.dp, vertical = 14.dp)
+                    ) {
+                        // Currency Picker Segmented Tabs (Fixed: shows clean "AED", never "AED (AED)")
                         Text(
-                            text = "Add Money / Transfer",
-                            fontSize = 20.sp,
+                            text = "SELECT TRANSFER CURRENCY",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Record money sent to the pool bank account",
-                            fontSize = 12.sp,
+                            letterSpacing = 1.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
-
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.testTag("close_add_money_dialog_btn")
-                    ) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close")
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Currency Picker Segmented Tabs (Fixed: shows clean "AED", never "AED (AED)")
-                Text(
-                    text = "SELECT TRANSFER CURRENCY",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                 Row(
                     modifier = Modifier
@@ -350,31 +374,6 @@ fun SimpleAddMoneyDialog(
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
-
-                // Error Banner
-                if (errorMessage != null) {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 14.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFEF4444).copy(alpha = 0.15f)),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(imageVector = Icons.Default.Info, contentDescription = null, tint = Color(0xFFF87171))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = errorMessage ?: "",
-                                fontSize = 12.sp,
-                                color = Color(0xFFF87171),
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-                }
 
                 // 1. Transfer Amount Input
                 Text(
@@ -990,52 +989,97 @@ fun SimpleAddMoneyDialog(
                     )
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+            }
 
-                // Submit Action Button
-                Button(
-                    onClick = {
-                        val amt = amountInput.toDoubleOrNull()
-                        if (amt == null || amt <= 0.0) {
-                            errorMessage = "Please enter a valid transfer amount."
-                            return@Button
-                        }
-                        if (referenceInput.isBlank()) {
-                            errorMessage = "Bank reference / wire slip number is required."
-                            return@Button
-                        }
-                        if (proofPath.isBlank()) {
-                            errorMessage = "Proof of transaction screenshot is mandatory."
-                            return@Button
-                        }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
 
-                        // Build final notes including audit tag if suspicious
-                        val finalNotes = buildString {
-                            if (notesInput.isNotBlank()) append(notesInput.trim())
-                            val analysis = analysisResult
-                            if (analysis != null && analysis.isSuspicious) {
-                                if (isNotEmpty()) append(" | ")
-                                append("[Potentially suspicious — requires verification: ")
-                                append(analysis.suspiciousWarnings.joinToString("; "))
-                                append("]")
-                            }
-                        }
-
-                        errorMessage = null
-                        onSubmit(amt, referenceInput.trim(), proofPath, finalNotes, selectedCurrency, currentRate)
-                    },
+            // Pinned Footer (Submit Action Button & Inline Validation Error)
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("submit_transfer_btn"),
-                    colors = ButtonDefaults.buttonColors(containerColor = MutedBluePrimary),
-                    shape = RoundedCornerShape(14.dp)
+                        .padding(horizontal = 22.dp, vertical = 14.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.Check, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Submit Transfer", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    if (errorMessage != null) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 10.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFEF4444).copy(alpha = 0.15f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF87171),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = errorMessage ?: "",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFF87171),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            val amt = amountInput.toDoubleOrNull()
+                            if (amt == null || amt <= 0.0) {
+                                errorMessage = "Please enter a valid transfer amount."
+                                return@Button
+                            }
+                            if (referenceInput.isBlank()) {
+                                errorMessage = "Bank reference / wire slip number is required."
+                                return@Button
+                            }
+                            if (proofPath.isBlank()) {
+                                errorMessage = "Proof of transaction screenshot is mandatory."
+                                return@Button
+                            }
+
+                            // Build final notes including audit tag if suspicious
+                            val finalNotes = buildString {
+                                if (notesInput.isNotBlank()) append(notesInput.trim())
+                                val analysis = analysisResult
+                                if (analysis != null && analysis.isSuspicious) {
+                                    if (isNotEmpty()) append(" | ")
+                                    append("[Potentially suspicious — requires verification: ")
+                                    append(analysis.suspiciousWarnings.joinToString("; "))
+                                    append("]")
+                                }
+                            }
+
+                            errorMessage = null
+                            onSubmit(amt, referenceInput.trim(), proofPath, finalNotes, selectedCurrency, currentRate)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("submit_transfer_btn"),
+                        colors = ButtonDefaults.buttonColors(containerColor = MutedBluePrimary),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Check, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Submit Transfer", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
     }
+}
+}
 }

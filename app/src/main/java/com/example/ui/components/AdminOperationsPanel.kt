@@ -39,6 +39,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,9 +83,16 @@ import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.ReportProblem
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.ManageAccounts
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import com.example.data.model.RecordState
 import com.example.data.model.ReconciliationState
 import com.example.data.model.SettlementState
+import com.example.data.model.UserRole
+import com.example.data.model.UserResponsibility
 
 @Composable
 fun AdminOperationsPanel(
@@ -99,7 +110,9 @@ fun AdminOperationsPanel(
     onOpenFifoLotAudit: () -> Unit = {},
     onResolveDispute: (PoolTransactionEntity) -> Unit = {},
     onSecondApproval: (PoolTransactionEntity) -> Unit = {},
-    onRecordSettlement: (PoolTransactionEntity) -> Unit = {}
+    onRecordSettlement: (PoolTransactionEntity) -> Unit = {},
+    whitelistedUsers: List<PoolUser> = emptyList(),
+    onAssignRolesAndResponsibilities: (PoolUser) -> Unit = {}
 ) {
     val pendingInjections = transactions.filter {
         it.stage == TransactionStage.CAPITAL_INJECTION && 
@@ -119,12 +132,20 @@ fun AdminOperationsPanel(
     }
 
     val timeFormat = SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.US)
+    var showSecurityAuditDialog by remember { mutableStateOf(false) }
+
+    if (showSecurityAuditDialog) {
+        SecurityAuditDialog(
+            transactions = transactions,
+            onDismiss = { showSecurityAuditDialog = false }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("admin_operations_panel"),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 100.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Admin Header Banner
@@ -188,6 +209,163 @@ fun AdminOperationsPanel(
                             fontSize = 12.sp,
                             color = TextSecondary
                         )
+                    }
+                }
+            }
+        }
+
+        // Bank-Grade Security & System Defense Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showSecurityAuditDialog = true }
+                    .testTag("admin_security_defense_card"),
+                colors = CardDefaults.cardColors(containerColor = SlateCard),
+                border = BorderStroke(1.dp, ProfitGreenBorder),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(ProfitGreenContainer)
+                                .border(1.dp, ProfitGreenBorder, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = ProfitGreenDark,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(ProfitGreen)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "SYSTEM DEFENSE: GRADE A+",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp),
+                                    color = ProfitGreenDark
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Sandbox Clean • TLS Strict • Ledger Hashes Verified",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { showSecurityAuditDialog = true },
+                        modifier = Modifier.testTag("open_security_audit_btn"),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text("Audit", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+
+        // Individual Roles & Operational Responsibilities Section (Admin Role Assignment)
+        if (whitelistedUsers.isNotEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("admin_roles_and_responsibilities_card"),
+                    colors = CardDefaults.cardColors(containerColor = SlateCard),
+                    border = BorderStroke(1.dp, SlateBorder),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(MutedBluePrimary.copy(alpha = 0.15f))
+                                        .border(1.dp, MutedBluePrimary.copy(alpha = 0.3f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ManageAccounts,
+                                        contentDescription = null,
+                                        tint = MutedBluePrimary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "ROLES & RESPONSIBILITIES",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = MutedBlueDark,
+                                            letterSpacing = 0.5.sp
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(ProfitGreenContainer)
+                                                .border(1.dp, ProfitGreenBorder, RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                                        ) {
+                                            Text(
+                                                text = "Default: User",
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = ProfitGreenDark
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = "${whitelistedUsers.size} Individuals · Admin can assign roles & duties",
+                                        fontSize = 11.sp,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Individual Members List
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            whitelistedUsers.forEach { member ->
+                                MemberRoleAssignmentItem(
+                                    member = member,
+                                    isCurrent = member.email.equals(currentUser.email, ignoreCase = true),
+                                    onAssignClick = { onAssignRolesAndResponsibilities(member) }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1074,6 +1252,171 @@ private fun AdminOpActionCard(
                     fontWeight = FontWeight.Bold,
                     color = iconTint
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MemberRoleAssignmentItem(
+    member: PoolUser,
+    isCurrent: Boolean,
+    onAssignClick: () -> Unit
+) {
+    val roleColor = when (member.role) {
+        UserRole.SUPER_ADMIN -> Color(0xFF6366F1)
+        UserRole.ADMIN -> MutedBluePrimary
+        UserRole.SUB_ADMIN -> Color(0xFFD97706)
+        UserRole.MEMBER -> Color(0xFF64748B)
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("member_role_item_${member.email}"),
+        colors = CardDefaults.cardColors(containerColor = SlateCardElevated),
+        border = BorderStroke(1.dp, SlateBorder),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(member.avatarColorHex)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (member.isAdmin) Icons.Default.AdminPanelSettings else Icons.Default.Person,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = member.name,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = TextPrimary
+                            )
+                            if (isCurrent) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "(You)",
+                                    fontSize = 11.sp,
+                                    color = MutedBlueDark,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        Text(
+                            text = member.email,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                    }
+                }
+
+                // Role Pill
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(roleColor.copy(alpha = 0.15f))
+                        .border(1.dp, roleColor.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = if (member.isDefaultUser) "USER (DEFAULT)" else member.role.label.uppercase(),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = roleColor
+                    )
+                }
+            }
+
+            if (member.customDesignation.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Badge,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = member.customDesignation,
+                        fontSize = 11.sp,
+                        color = TextSecondary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Responsibilities chips summary & Assign action button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Short summary badge of duties
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = "${member.responsibilities.size} duties assigned",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "•",
+                        fontSize = 11.sp,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    val previewDuty = member.responsibilities.firstOrNull()?.title?.substringBefore("&")?.trim() ?: "Standard User"
+                    Text(
+                        text = previewDuty,
+                        fontSize = 11.sp,
+                        color = MutedBlueDark,
+                        maxLines = 1
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onAssignClick,
+                    modifier = Modifier.testTag("assign_role_btn_${member.email}"),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Assign Roles",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
     }

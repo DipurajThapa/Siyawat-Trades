@@ -19,6 +19,7 @@ import com.example.data.model.TimePeriodFilter
 import com.example.data.model.TimePeriodType
 import com.example.data.model.TransactionStage
 import com.example.data.model.TransactionStatus
+import com.example.data.model.UserResponsibility
 import com.example.data.model.UserRole
 import com.example.data.remote.DriveSyncStatus
 import com.example.data.remote.GoogleDriveService
@@ -60,11 +61,11 @@ data class PoolUiState(
     val driveSyncStatus: DriveSyncStatus = DriveSyncStatus(),
     val toastMessage: String? = null,
     // Multi-Currency State
-    val selectedCurrency: AppCurrency = AppCurrency.USD,
+    val selectedCurrency: AppCurrency = AppCurrency.INR,
     val exchangeRates: Map<AppCurrency, Double> = mapOf(
-        AppCurrency.USD to 1.0,
         AppCurrency.INR to 83.50,
-        AppCurrency.AED to 3.6725
+        AppCurrency.AED to 3.6725,
+        AppCurrency.USD to 1.0
     ),
     val showRateDialog: Boolean = false,
     val showMoneyDistributionDialog: Boolean = false,
@@ -74,7 +75,8 @@ data class PoolUiState(
     val transactionToSettle: PoolTransactionEntity? = null,
     val transactionToDispute: PoolTransactionEntity? = null,
     val transactionToResolveDispute: PoolTransactionEntity? = null,
-    val showFifoLotAuditDialog: Boolean = false
+    val showFifoLotAuditDialog: Boolean = false,
+    val selectedUserForRoleAssignment: PoolUser? = null
 ) {
     val currentRate: Double
         get() = exchangeRates[selectedCurrency] ?: selectedCurrency.defaultRatePerUsd
@@ -102,12 +104,12 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
     private val _toastMessage = MutableStateFlow<String?>(null)
 
     // Multi-currency StateFlows
-    private val _selectedCurrency = MutableStateFlow(AppCurrency.USD)
+    private val _selectedCurrency = MutableStateFlow(AppCurrency.INR)
     private val _exchangeRates = MutableStateFlow(
         mapOf(
-            AppCurrency.USD to 1.0,
             AppCurrency.INR to 83.50,
-            AppCurrency.AED to 3.6725
+            AppCurrency.AED to 3.6725,
+            AppCurrency.USD to 1.0
         )
     )
     private val _showRateDialog = MutableStateFlow(false)
@@ -117,6 +119,7 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
     private val _transactionToDispute = MutableStateFlow<PoolTransactionEntity?>(null)
     private val _transactionToResolveDispute = MutableStateFlow<PoolTransactionEntity?>(null)
     private val _showFifoLotAuditDialog = MutableStateFlow(false)
+    private val _selectedUserForRoleAssignment = MutableStateFlow<PoolUser?>(null)
 
     val uiState: StateFlow<PoolUiState> = combine(
         repository.allTransactions,
@@ -142,7 +145,8 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
         _transactionToSettle,
         _transactionToDispute,
         _transactionToResolveDispute,
-        _showFifoLotAuditDialog
+        _showFifoLotAuditDialog,
+        _selectedUserForRoleAssignment
     ) { args ->
         @Suppress("UNCHECKED_CAST")
         val rawTransactions = args[0] as List<PoolTransactionEntity>
@@ -170,10 +174,24 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
         val txToDispute = args[21] as PoolTransactionEntity?
         val txToResolveDispute = args[22] as PoolTransactionEntity?
         val showFifoAudit = args[23] as Boolean
+        val selectedUserForRole = args[24] as PoolUser?
 
         val currentRate = exchangeRates[selectedCurrency] ?: selectedCurrency.defaultRatePerUsd
+        val isManager = currentUser.canManage
 
-        // 1. Time period filtering and range boundary resolution
+        // 1. Role-based data isolation:
+        // Admin, Super Admin, and Sub-admin (currentUser.canManage) can see all pool records, total collections, and USDT details.
+        // Regular members (MEMBER) can ONLY see transactions they initiated or received.
+        val userVisibleRawTransactions = if (isManager) {
+            rawTransactions
+        } else {
+            rawTransactions.filter { tx ->
+                tx.userEmail.equals(currentUser.email, ignoreCase = true) ||
+                (tx.recipientEmail != null && tx.recipientEmail.equals(currentUser.email, ignoreCase = true))
+            }
+        }
+
+        // 2. Time period filtering and range boundary resolution
         val now = System.currentTimeMillis()
         val bounds = timePeriodFilter.resolveRange(now)
         val periodTransactions = if (bounds.startTime <= 0L && bounds.endTime >= Long.MAX_VALUE - 1000L) {
@@ -187,22 +205,57 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
             rawTransactions.filter { it.timestamp <= bounds.endTime }
         }
 
-        // 2. Calculate live metrics in active display currency with historical solvency balance at period end
-        val metrics = repository.calculateMetrics(
-            transactions = periodTransactions,
-            cumulativeTransactions = cumulativeTransactions,
+        // Transactions visible to current user in this time period
+        val userVisiblePeriodTransactions = if (isManager) {
+            periodTransactions
+        } else {
+            if (bounds.startTime <= 0L && bounds.endTime >= Long.MAX_VALUE - 1000L) {
+                userVisibleRawTransactions
+            } else {
+                userVisibleRawTransactions.filter { it.timestamp in bounds.startTime..bounds.endTime }
+            }
+        }
+        val userVisibleCumulativeTransactions = if (isManager) {
+            cumulativeTransactions
+        } else {
+            if (bounds.endTime >= Long.MAX_VALUE - 1000L) {
+                userVisibleRawTransactions
+            } else {
+                userVisibleRawTransactions.filter { it.timestamp <= bounds.endTime }
+            }
+        }
+
+        // 3. Calculate live metrics:
+        // For managers, calculate full pool metrics.
+        // For regular members, calculate metrics strictly scoped to their own transactions with USDT inventory redacted to 0.0.
+        val rawMetrics = repository.calculateMetrics(
+            transactions = if (isManager) periodTransactions else userVisiblePeriodTransactions,
+            cumulativeTransactions = if (isManager) cumulativeTransactions else userVisibleCumulativeTransactions,
             displayCurrency = selectedCurrency,
             ratePerUsd = currentRate
         )
-        val alerts = repository.evaluateComplianceAlerts(rawTransactions, metrics)
+        val metrics = if (isManager) {
+            rawMetrics
+        } else {
+            rawMetrics.copy(
+                remainingPoolUsdt = 0.0,
+                unallocatedCentralUsdt = 0.0,
+                totalUsdtPurchased = 0.0,
+                totalUsdtDistributed = 0.0,
+                totalDistributionFeesUsdt = 0.0,
+                totalTradingFeesUsdt = 0.0,
+                centralBankBalanceFiat = 0.0
+            )
+        }
+        val alerts = if (isManager) repository.evaluateComplianceAlerts(rawTransactions, metrics) else emptyList()
         val fifoResult = repository.calculateFifoLedger(rawTransactions)
 
-        // 3. Compute period statistics converted to active display currency
+        // 4. Compute period statistics converted to active display currency
         var moneySpent = 0L
         var pendingSpent = 0L
         var moneyEarnedBack = 0L
 
-        for (tx in periodTransactions) {
+        for (tx in userVisiblePeriodTransactions) {
             if (tx.status == TransactionStatus.CANCELLED || tx.status == TransactionStatus.REVERSED) {
                 continue
             }
@@ -220,12 +273,19 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
                 TransactionStage.LIQUIDATION -> {
                     moneyEarnedBack += displayAmt
                 }
+                TransactionStage.USDT_DISTRIBUTION -> {
+                    if (!isManager && tx.recipientEmail != null && tx.recipientEmail.equals(currentUser.email, ignoreCase = true)) {
+                        moneyEarnedBack += displayAmt
+                    }
+                }
                 else -> Unit
             }
         }
 
-        val profitLoss = metrics.netRealizedProfitLossFiat.toLong()
-        val usdtRemaining = metrics.remainingPoolUsdt.toLong()
+        // For managers: net realized profit/loss and remaining USDT of the pool.
+        // For regular members: their personal net return (moneyEarnedBack - moneySpent) and 0 USDT remaining (hidden in UI).
+        val profitLoss = if (isManager) metrics.netRealizedProfitLossFiat.toLong() else (moneyEarnedBack - moneySpent)
+        val usdtRemaining = if (isManager) metrics.remainingPoolUsdt.toLong() else 0L
 
         val periodSummary = PeriodSummary(
             period = timePeriodFilter.toTimePeriod(),
@@ -238,13 +298,13 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
             pendingSpent = pendingSpent,
             moneyEarnedBack = moneyEarnedBack,
             usdtRemaining = usdtRemaining,
-            totalTransactionsCount = periodTransactions.size,
+            totalTransactionsCount = userVisiblePeriodTransactions.size,
             profitLoss = profitLoss,
             currency = selectedCurrency
         )
 
-        // 4. Filter transactions for display
-        val filtered = periodTransactions.filter { tx ->
+        // 5. Filter transactions for display
+        val filtered = userVisiblePeriodTransactions.filter { tx ->
             val matchesStage = stageFilter == null || tx.stage == stageFilter
             val matchesQuery = query.isEmpty() ||
                     tx.userName.lowercase().contains(query) ||
@@ -257,7 +317,7 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         PoolUiState(
-            transactions = rawTransactions,
+            transactions = userVisibleRawTransactions,
             filteredTransactions = filtered,
             metrics = metrics,
             periodSummary = periodSummary,
@@ -286,7 +346,8 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
             transactionToSettle = txToSettle,
             transactionToDispute = txToDispute,
             transactionToResolveDispute = txToResolveDispute,
-            showFifoLotAuditDialog = showFifoAudit
+            showFifoLotAuditDialog = showFifoAudit,
+            selectedUserForRoleAssignment = selectedUserForRole
         )
     }.stateIn(
         scope = viewModelScope,
@@ -461,7 +522,8 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
                 transactions = periodTxs,
                 timePeriod = state.selectedTimePeriod,
                 summary = state.periodSummary,
-                activeRatePerUsd = activeRate
+                activeRatePerUsd = activeRate,
+                currentUser = state.currentUser
             )
 
             viewModelScope.launch {
@@ -594,7 +656,58 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
         _toastMessage.value = "Restored session as Designated Central Administrator."
     }
 
-    fun addWhitelistedMember(email: String, name: String) {
+    fun openRoleAssignmentDialog(user: PoolUser) {
+        _selectedUserForRoleAssignment.value = user
+    }
+
+    fun closeRoleAssignmentDialog() {
+        _selectedUserForRoleAssignment.value = null
+    }
+
+    fun updateUserRoleAndResponsibilities(
+        email: String,
+        newRole: UserRole,
+        responsibilities: Set<UserResponsibility>,
+        customDesignation: String
+    ) {
+        val currentAdmin = _currentUser.value
+        if (!currentAdmin.isAdmin && !currentAdmin.canManageMembers) {
+            _toastMessage.value = "Unauthorized: Only administrators can assign roles & responsibilities."
+            return
+        }
+
+        val updatedList = _whitelistedUsers.value.map { user ->
+            if (user.email.equals(email, ignoreCase = true)) {
+                user.copy(
+                    role = newRole,
+                    responsibilities = responsibilities,
+                    customDesignation = customDesignation.trim()
+                )
+            } else {
+                user
+            }
+        }
+        _whitelistedUsers.value = updatedList
+
+        // If currently logged-in user is this user, update active user session in real time
+        if (_currentUser.value.email.equals(email, ignoreCase = true)) {
+            val updatedActiveUser = updatedList.firstOrNull { it.email.equals(email, ignoreCase = true) }
+            if (updatedActiveUser != null) {
+                _currentUser.value = updatedActiveUser
+            }
+        }
+
+        _selectedUserForRoleAssignment.value = null
+        _toastMessage.value = "Assigned ${newRole.label} role with ${responsibilities.size} duties to $email."
+    }
+
+    fun addWhitelistedMember(
+        email: String,
+        name: String,
+        role: UserRole = UserRole.MEMBER, // By default, it is the user!
+        responsibilities: Set<UserResponsibility> = UserResponsibility.defaultFor(UserRole.MEMBER),
+        customDesignation: String = ""
+    ) {
         val trimmedEmail = email.trim()
         if (trimmedEmail.isBlank() || _whitelistedUsers.value.any { it.email.equals(trimmedEmail, ignoreCase = true) }) {
             return
@@ -602,12 +715,14 @@ class PoolViewModel(application: Application) : AndroidViewModel(application) {
         val newUser = PoolUser(
             email = trimmedEmail,
             name = name.ifBlank { trimmedEmail.substringBefore("@") },
-            role = UserRole.MEMBER,
+            role = role, // Defaults to UserRole.MEMBER (User)
             isWhitelisted = true,
-            avatarColorHex = 0xFF10B981
+            avatarColorHex = 0xFF10B981,
+            responsibilities = responsibilities,
+            customDesignation = customDesignation
         )
         _whitelistedUsers.value = _whitelistedUsers.value + newUser
-        _toastMessage.value = "Added $trimmedEmail to approved pool whitelist."
+        _toastMessage.value = "Added $trimmedEmail to approved pool as ${role.label}."
     }
 
     fun removeWhitelistedMember(email: String) {
